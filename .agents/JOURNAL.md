@@ -37,3 +37,7 @@ Local validation: 16 merge-policy/CI-ownership regression tests pass. Four chang
 - [ ] Update the portfolio Markdown and HTML with measured progress and remaining limits.
 
 2026-09-12 heartbeat validation passed locally. Source policy tests and workflow parsing pass; the application pilot builds pass. Hosted PR checks, production matching and the first branch heartbeat are the next release gates. No broad sync or disabled workflow reactivation was run.
+
+2026-09-12: Required-check rollout preserves direct skip-CI updates only for unprotected branches; protected branches and rejected direct pushes use review commits with runnable checks. Unknown protection and failed PR creation fail visibly. Preserve all existing app data and workflow pauses until live gates are verified.
+
+2026-09-12 local verification: shell syntax and all 25 shared policy tests pass; the updated bot workflows also re-evaluate after GitHub default CodeQL completes. The extended Git fixture run could not validate behavior on this Windows host: Bash child_copy/dofork resource failures prevented command execution, including unchanged preservation cases. The 18-case fixture suite must pass on the hosted Linux runner before this source repair is merged. No live config sync has been dispatched.

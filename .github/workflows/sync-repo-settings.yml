@@ -228,9 +228,9 @@ jobs:
     env:
       GH_PAT: ${{ secrets.GH_PAT }}
       INCLUDE_ARCHIVED: ${{ github.event_name == 'schedule' && 'true' || inputs.include_archived }}
-      # NOTE: All target-repo commits are made with `[skip ci]` in the message
-      # so they do NOT fan-out and trigger CI/CodeQL/Scorecard in every downstream
-      # repo. This was the biggest single source of Actions-minute waste.
+      # Direct updates to unprotected branches retain `[skip ci]`. Protected
+      # branches receive PRs without a skip directive so required checks run.
+      # Failed direct pushes use that same review path.
       # Application CI belongs to each repository; never replace it with the
       # source repository's own build/test workflow.
       SYNC_ITEMS: |

@@ -51,6 +51,7 @@ class ConfigSyncTests(unittest.TestCase):
             "PRAWN_REAL_GIT": Path(real_git).as_posix(), "PRAWN_BARE_REPO": self.bare.as_posix(),
             "PRAWN_GH_LOG": self.logs.as_posix(), "PRAWN_TEST_MODE": "normal",
             "PRAWN_TEST_TOPICS": "", "PRAWN_TEST_ARCHIVED": "false",
+            "PRAWN_TEST_PROTECTED": "false", "PRAWN_GIT_LOG": (self.base / "git-calls.txt").as_posix(),
         })
         script = Path(os.environ.get("PRAWN_CONFIG_SYNC_SCRIPT", ROOT / ".github/scripts/sync-selected-paths.sh"))
         self.script = self.source / "sync.sh"
@@ -96,18 +97,27 @@ case "$1 $2" in
   'api repos/fixture/target/topics')
     [ "$PRAWN_TEST_MODE" != topics_error ] || exit 73
     printf '%s\\n' "$PRAWN_TEST_TOPICS" ;;
+  'api repos/fixture/target/branches/main')
+    [ "$PRAWN_TEST_MODE" != protection_error ] || exit 76
+    if [ "$PRAWN_TEST_MODE" = invalid_protection ]; then printf 'unknown\\n'
+    else printf '%s\\n' "$PRAWN_TEST_PROTECTED"; fi ;;
   'api -X')
     [ "$3" = PATCH ] && [ "$4" = repos/fixture/target ] || exit 91
     case "$6" in archived=true|archived=false) exit 0;; *) exit 92;; esac ;;
   'repo clone')
     [ "$3" = fixture/target ] || exit 93
     exec "$PRAWN_REAL_GIT" clone "$PRAWN_BARE_REPO" "$4" ;;
+  'pr create')
+    [ "$PRAWN_TEST_MODE" != pr_error ] || exit 77
+    printf 'https://github.com/fixture/target/pull/1\\n' ;;
   *) echo 'Unexpected fake GitHub operation' >&2; exit 94 ;;
 esac
 ''')
         self.executable("git", '''#!/usr/bin/env bash
 set -eu
+printf '%s\\n' "$*" >> "$PRAWN_GIT_LOG"
 if [ "$1" = push ] && [ "$PRAWN_TEST_MODE" = push_error ]; then exit 75; fi
+if [ "$*" = 'push origin HEAD:main' ] && [ "$PRAWN_TEST_MODE" = main_push_error ]; then exit 75; fi
 exec "$PRAWN_REAL_GIT" "$@"
 ''')
         self.executable("sleep", "#!/usr/bin/env bash\n# Retry delays are unnecessary for deterministic fixture failures.\nexit 0\n")
@@ -140,9 +150,10 @@ exec "$PRAWN_REAL_GIT" "$@"
         return subprocess.run([self.real_git, *args], cwd=cwd, env=self.env,
                               capture_output=True, text=True, check=True, timeout=60)
 
-    def run_sync(self, mode="normal", topics="", archived=False):
+    def run_sync(self, mode="normal", topics="", archived=False, protected=False):
         env = {**self.env, "PRAWN_TEST_MODE": mode, "PRAWN_TEST_TOPICS": topics,
-               "PRAWN_TEST_ARCHIVED": "true" if archived else "false"}
+               "PRAWN_TEST_ARCHIVED": "true" if archived else "false",
+               "PRAWN_TEST_PROTECTED": "true" if protected else "false"}
         return subprocess.run([self.bash, "--noprofile", "--norc", "sync.sh"], cwd=self.source,
                               env=env, capture_output=True, text=True, timeout=120)
 
@@ -210,6 +221,62 @@ exec "$PRAWN_REAL_GIT" "$@"
         result = self.run_sync(mode="push_error", archived=True)
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertEqual(self.git("rev-parse", "main", cwd=self.bare).stdout.strip(), self.original_head)
+        self.assertTrue(self.logs.read_text().rstrip().endswith("archived=true"))
+
+    def assert_review_branch(self):
+        self.assertEqual(self.git("rev-parse", "main", cwd=self.bare).stdout.strip(), self.original_head)
+        self.assertEqual(self.git("rev-parse", "sync-1-1^", cwd=self.bare).stdout.strip(), self.original_head)
+        self.assertEqual(self.git("show", "-s", "--format=%B", "sync-1-1", cwd=self.bare).stdout.strip(), "chore(config): sync from sourcerepo")
+        self.assertEqual(self.git("show", "sync-1-1:managed.txt", cwd=self.bare).stdout, "new shared config\n")
+        for path, value in self.preserved.items():
+            self.assertEqual(self.git("show", "sync-1-1:" + path, cwd=self.bare).stdout, value)
+
+    def test_protected_branch_uses_review_without_a_direct_push(self):
+        result = self.run_sync(protected=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assert_review_branch()
+        self.assertIn("pr create --repo fixture/target", self.logs.read_text())
+        self.assertNotIn("push origin HEAD:main", (self.base / "git-calls.txt").read_text())
+        self.assertIn("Opened PR for target", result.stdout)
+
+    def test_unprotected_direct_commit_keeps_existing_skip_policy(self):
+        result = self.run_sync()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.git("show", "-s", "--format=%B", "main", cwd=self.bare).stdout.strip(), self.env["COMMIT_MESSAGE"])
+        self.assertNotIn("pr create", self.logs.read_text())
+
+    def test_failed_direct_push_falls_back_to_runnable_review(self):
+        result = self.run_sync(mode="main_push_error")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assert_review_branch()
+        self.assertIn("pr create --repo fixture/target", self.logs.read_text())
+
+    def test_unreadable_protection_fails_before_clone_or_archive_change(self):
+        result = self.run_sync(mode="protection_error", archived=True)
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("Cannot read branch protection", result.stderr)
+        self.assert_untouched()
+
+    def test_invalid_protection_fails_before_clone_or_archive_change(self):
+        result = self.run_sync(mode="invalid_protection", archived=True)
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("Cannot read branch protection", result.stderr)
+        self.assert_untouched()
+
+    def test_pr_creation_failure_is_reported_and_archive_is_restored(self):
+        result = self.run_sync(mode="pr_error", archived=True, protected=True)
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assert_review_branch()
+        self.assertIn("Review branch or PR creation failed", result.stderr)
+        self.assertNotIn("Opened PR for target", result.stdout)
+        self.assertTrue(self.logs.read_text().rstrip().endswith("archived=true"))
+
+    def test_protected_review_push_failure_restores_archive(self):
+        result = self.run_sync(mode="push_error", archived=True, protected=True)
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("Review branch or PR creation failed", result.stderr)
+        self.assertEqual(self.git("rev-parse", "main", cwd=self.bare).stdout.strip(), self.original_head)
+        self.assertNotIn("pr create", self.logs.read_text())
         self.assertTrue(self.logs.read_text().rstrip().endswith("archived=true"))
 
     def update_fixture_commit(self):
