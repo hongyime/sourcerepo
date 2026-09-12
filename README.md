@@ -46,7 +46,8 @@ Every non-disabled repo (**including archived** — see below) receives:
 
 | Item | Source path |
 |------|-------------|
-| GitHub Actions workflows | `.github/workflows/ci.yml`, `codeql.yml`, `scorecard.yml`, `trufflehog.yml`, `heartbeat.yml`, `lfs-guard.yml`, `dependabot-auto-merge.yml`, `auto-merge-bots.yml`, `dependency-review.yml`, `summary.yml`, `labeler.yml`, `greetings.yml` |
+| GitHub Actions workflows | `codeql.yml`, `scorecard.yml`, `trufflehog.yml`, `heartbeat.yml`, `lfs-guard.yml`, `dependabot-auto-merge.yml`, `auto-merge-bots.yml`, `dependency-review.yml`, `summary.yml`, `labeler.yml`, `greetings.yml` |
+| Bot merge policy | `.github/scripts/checked-bot-merge.py` |
 | Dependabot config | `.github/dependabot_config.yml` → `.github/dependabot.yml` |
 | Issue + PR templates | `.github/ISSUE_TEMPLATE/*`, `.github/pull_request_template.md` |
 | Community files | `CONTRIBUTING.md`, `SECURITY.md`, `AGENTS.md` |
@@ -183,12 +184,36 @@ Current practical policy:
 - Do not restore the old private-except-`theprawn` rule; it does not match the
   current estate.
 
-## Cleanup performed on every target repo
+## Bot merge checks
 
-- Delete unlisted dot items at root (except exemption list: `.github/`, `.gitignore`, `.gitattributes`, `.editorconfig`, `.nvmrc`, `.node-version`, `.python-version`, `.tool-versions`, `.prettier*`, `.eslint*`, `.stylelint*`, `.babel*`, `.browserslistrc`, `.dockerignore`, `.npmrc`, `.yarnrc*`, `.pnpmfile.cjs`, `.env.example`, `.env.template`, `.env.sample`, `.sourcery.yml`, `.deepsource.toml`, `.htaccess`)
-- Delete all `*.code-workspace` files recursively
-- Remove `skills/`, `skills-lock.json`, and `docs/` from tracking
-- Inject `.gitignore` entries to prevent re-accumulation
+The shared bot workflows evaluate completed builds and status updates, or an
+explicit manual sweep. They read the policy from the trusted default branch and
+never check out PR code with the merge token. All paths require an open bot PR in
+the same repository, the default target branch, clean mergeability, a required
+successful `Build Check` / `Build` result, and no unfinished or failed checks.
+The merge request includes the exact checked head SHA. Missing checks, failed API
+lookups, draft/fork PRs and changed heads leave the PR open.
+
+Repositories without that required Build check need manual review. Before
+re-enabling automation for a Vercel project, its actual deployment check must also
+be configured as required and verified on a representative PR. A successful
+generic CI job that skips the app build is not sufficient validation. Do not
+enable the workflow until the repository's real build is mapped and tested.
+
+Application `ci.yml` is owned by each target repository and is no longer copied
+by the shared sync. The source repository's own Build Check runs the merge-policy
+regressions. Run `python -m unittest discover -s .github/tests -v` locally.
+
+The September 12 portfolio rollout suspends the confirmed unsafe legacy bot
+merge workflows while each repository's requirements are validated. Build,
+security and deployment workflows continue. Updating a workflow's file does not
+constitute verification or authorization to re-enable it automatically.
+
+## Files preserved during sync
+
+- Preserve unlisted dot items, editor workspaces, skills and documentation.
+- Merge shared template directories while preserving custom forms.
+- Maintain the marked `.gitignore` block without deleting application files.
 
 ## License
 
