@@ -16,10 +16,21 @@ CONFIG = {"version": 1, "rootDirectory": ""}
 VERCEL = '{"git":{"deploymentEnabled":false}}\n'
 
 
-def validate_config(path: Path) -> None:
-    # Nested Vercel roots require a separate reviewed rollout.
-    if path.is_symlink() or json.loads(path.read_text()) != CONFIG:
-        raise ValueError("Heartbeat opt-in must specify version 1 and an empty rootDirectory")
+def validate_root(root: str) -> str:
+    # Keep this rollout bounded to the repository root or one plain directory.
+    # No relative traversal, hidden directories, platform paths or glob syntax.
+    if not isinstance(root, str) or (root and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", root)):
+        raise ValueError("rootDirectory must be empty or one plain directory name")
+    return root
+
+
+def validate_config(path: Path) -> str:
+    config = json.loads(path.read_text())
+    if (path.is_symlink() or not isinstance(config, dict)
+            or set(config) != set(CONFIG) or type(config.get("version")) is not int
+            or config["version"] != 1):
+        raise ValueError("Heartbeat opt-in must specify version 1 and rootDirectory")
+    return validate_root(config["rootDirectory"])
 
 
 def blob_sha(content: str) -> str:
@@ -28,6 +39,8 @@ def blob_sha(content: str) -> str:
 
 
 def validate_vercel(path: Path) -> None:
+    if path.is_symlink() or path.parent.is_symlink():
+        raise ValueError("Heartbeat deployment config must not use symbolic links")
     enabled = json.loads(path.read_text()).get("git", {}).get("deploymentEnabled")
     # A matching true wildcard can override false. Initial pilots use only
     # explicit false rules, leaving unspecified application branches enabled.
@@ -63,7 +76,8 @@ class GitHub:
             raise RuntimeError(f"GitHub {method} {path} failed: HTTP {error.code}") from None
 
 
-def heartbeat(api, repository: str, ref: str, event: str, timestamp: str) -> dict:
+def heartbeat(api, repository: str, ref: str, event: str, timestamp: str, root: str = "") -> dict:
+    root = validate_root(root)
     info = api.request("")
     default = info["default_branch"]
     if info["full_name"] != repository or default == BRANCH:
@@ -73,9 +87,15 @@ def heartbeat(api, repository: str, ref: str, event: str, timestamp: str) -> dic
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", timestamp):
         raise ValueError("Invalid UTC timestamp")
 
-    marker = json.dumps({"version": 1, "repository": repository}, sort_keys=True) + "\n"
+    ownership = {"version": 1, "repository": repository}
+    if root:
+        ownership["rootDirectory"] = root
+    marker = json.dumps(ownership, sort_keys=True) + "\n"
     files = {".prawn-heartbeat.json": marker, "vercel.json": VERCEL,
              "last_sync.txt": timestamp + "\n"}
+    if root:
+        files[root + "/vercel.json"] = VERCEL
+    directories = {root} if root else set()
     existing = api.request("/git/ref/heads/" + BRANCH)
     previous = None
     if existing is not None:
@@ -85,11 +105,13 @@ def heartbeat(api, repository: str, ref: str, event: str, timestamp: str) -> dic
         commit = api.request("/git/commits/" + previous)
         tree = api.request("/git/trees/" + commit["tree"]["sha"] + "?recursive=1")
         entries = {entry["path"]: entry for entry in tree["tree"]}
-        if tree.get("truncated") or len(tree["tree"]) != 3 or set(entries) != set(files):
+        if (tree.get("truncated") or len(tree["tree"]) != len(files) + len(directories)
+                or set(entries) != set(files) | directories):
             raise ValueError("Reserved heartbeat branch contains unexpected files")
-        if any(e["type"] != "blob" or e["mode"] != "100644" for e in entries.values()):
+        if (any(entries[path]["type"] != "blob" or entries[path]["mode"] != "100644" for path in files)
+                or any(entries[path]["type"] != "tree" or entries[path]["mode"] != "040000" for path in directories)):
             raise ValueError("Reserved heartbeat branch contains unexpected file modes")
-        for path in (".prawn-heartbeat.json", "vercel.json"):
+        for path in files.keys() - {"last_sync.txt"}:
             if entries[path]["sha"] != blob_sha(files[path]):
                 raise ValueError("Reserved heartbeat branch is not owned by this configuration")
         if entries["last_sync.txt"]["sha"] == blob_sha(files["last_sync.txt"]):
@@ -116,14 +138,14 @@ def main() -> None:
     parser.add_argument("--validate-config", type=Path)
     args = parser.parse_args()
     config_path = args.validate_config or Path(".github/branch-heartbeat.json")
-    validate_config(config_path)
+    root = validate_config(config_path)
     if args.validate_config:
         return
-    validate_vercel(Path("vercel.json"))
+    validate_vercel(Path(root) / "vercel.json")
     repository = os.environ["GITHUB_REPOSITORY"]
     result = heartbeat(GitHub(repository, os.environ["GITHUB_TOKEN"]), repository,
                        os.environ["GITHUB_REF"], os.environ["GITHUB_EVENT_NAME"],
-                       datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+                       datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), root)
     print(json.dumps(result))
 
 

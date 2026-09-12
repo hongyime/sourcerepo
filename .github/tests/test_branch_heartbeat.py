@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).parents[2]
 spec = importlib.util.spec_from_file_location("heartbeat", ROOT / ".github/scripts/branch-heartbeat.py")
@@ -40,6 +41,8 @@ class FakeGitHub:
             self.trees[sha] = {"truncated": False, "tree": [
                 {"path": e["path"], "type": e["type"], "mode": e["mode"],
                  "sha": heartbeat.blob_sha(e["content"])} for e in data["tree"]]}
+            for directory in sorted({e['path'].split('/')[0] for e in data['tree'] if '/' in e['path']}):
+                self.trees[sha]['tree'].append({'path': directory, 'type': 'tree', 'mode': '040000', 'sha': 'subtree'})
             return {"sha": sha}
         if path == "/git/commits" and method == "POST":
             sha = "commit" + str(len(self.commits) + 1)
@@ -140,12 +143,14 @@ class BranchHeartbeatTests(unittest.TestCase):
             self.run_heartbeat("2026-09-19T06:00:00Z")
         self.assertEqual(self.api.ref, original)
 
-    def test_opt_in_refuses_nested_roots_unknown_fields_and_invalid_json(self):
+    def test_opt_in_accepts_reviewed_directory_and_refuses_unsafe_config(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "config.json"
             path.write_text(json.dumps(heartbeat.CONFIG))
             heartbeat.validate_config(path)
-            for value in [{"version": 1, "rootDirectory": "web"}, {"version": 2, "rootDirectory": ""},
+            path.write_text(json.dumps({"version": 1, "rootDirectory": "web"}))
+            self.assertEqual(heartbeat.validate_config(path), 'web')
+            for value in [{"version": True, "rootDirectory": ""}, {"version": 2, "rootDirectory": ""},
                           {**heartbeat.CONFIG, "branch": "main"}, {}, None]:
                 path.write_text(json.dumps(value))
                 with self.assertRaises(ValueError):
@@ -153,6 +158,68 @@ class BranchHeartbeatTests(unittest.TestCase):
             path.write_text("invalid json")
             with self.assertRaises(ValueError):
                 heartbeat.validate_config(path)
+
+    def test_nested_root_creates_both_disabled_configs_and_preserves_history(self):
+        def run(timestamp):
+            return heartbeat.heartbeat(self.api, 'owner/app', 'refs/heads/main', 'workflow_dispatch', timestamp, 'web')
+        first = run('2026-09-12T06:00:00Z')
+        files = {e['path']: e['content'] for m, p, d in self.api.calls if m == 'POST' and p == '/git/trees' for e in d['tree']}
+        self.assertEqual(set(files), {'.prawn-heartbeat.json', 'vercel.json', 'web/vercel.json', 'last_sync.txt'})
+        self.assertEqual(json.loads(files['.prawn-heartbeat.json'])['rootDirectory'], 'web')
+        for name in ['vercel.json', 'web/vercel.json']:
+            self.assertIs(json.loads(files[name])['git']['deploymentEnabled'], False)
+        self.assertFalse(run('2026-09-12T06:00:00Z')['changed'])
+        second = run('2026-09-19T06:00:00Z')
+        self.assertEqual(self.api.commits[second['sha']]['parents'], [first['sha']])
+        self.assertIs(self.api.calls[-1][2]['force'], False)
+
+    def test_nested_config_tampering_directory_modes_or_root_change_refused(self):
+        heartbeat.heartbeat(self.api, 'owner/app', 'refs/heads/main', 'workflow_dispatch', '2026-09-12T06:00:00Z', 'web')
+        original = copy.deepcopy(self.api)
+        for mutation in ['config', 'directory', 'extra', 'duplicate', 'changed-root']:
+            with self.subTest(mutation=mutation):
+                self.api = copy.deepcopy(original)
+                entries = self.api.trees['1']['tree']
+                if mutation == 'config':
+                    next(e for e in entries if e['path'] == 'web/vercel.json')['sha'] = 'tampered'
+                elif mutation == 'directory':
+                    next(e for e in entries if e['path'] == 'web')['mode'] = '120000'
+                elif mutation == 'extra':
+                    entries.append({'path': 'web/app.js', 'type': 'blob', 'mode': '100644', 'sha': 'app'})
+                elif mutation == 'duplicate':
+                    entries[-1] = entries[0]
+                self.api.calls.clear()
+                with self.assertRaises(ValueError):
+                    heartbeat.heartbeat(self.api, 'owner/app', 'refs/heads/main', 'workflow_dispatch', '2026-09-19T06:00:00Z', 'other' if mutation == 'changed-root' else 'web')
+                self.assertEqual(self.api.ref, original.ref)
+                self.assertTrue(all(m == 'GET' for m, _, _ in self.api.calls))
+
+    def test_unsafe_roots_fail_before_any_api_request(self):
+        for root in ['.', '..', '../web', '/web', 'C:/web', 'web/other', 'web\\other', '.git', '*', 'web ', None, False, 'x'*65]:
+            with self.subTest(root=root), self.assertRaises(ValueError):
+                heartbeat.heartbeat(self.api, 'owner/app', 'refs/heads/main', 'workflow_dispatch', '2026-09-12T06:00:00Z', root)
+        self.assertEqual(self.api.calls, [])
+
+    def test_main_reads_the_nested_project_config_before_api_calls(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root/'.github').mkdir()
+            (root/'web').mkdir()
+            (root/'.github/branch-heartbeat.json').write_text('{"version":1,"rootDirectory":"web"}')
+            (root/'web/vercel.json').write_text('{"git":{"deploymentEnabled":{"automation/heartbeat":false}}}')
+            previous = Path.cwd()
+            try:
+                os.chdir(root)
+                with patch('sys.argv', ['heartbeat']), patch.dict(os.environ, {'GITHUB_REPOSITORY':'owner/app', 'GITHUB_REF':'refs/heads/main', 'GITHUB_EVENT_NAME':'workflow_dispatch', 'GITHUB_TOKEN':'synthetic'}), patch.object(heartbeat, 'GitHub', return_value=self.api):
+                    heartbeat.main()
+                    self.assertIsNotNone(self.api.ref)
+                    self.api.calls.clear()
+                    (root/'web/vercel.json').write_text('{"git":{"deploymentEnabled":true}}')
+                    with self.assertRaises(ValueError):
+                        heartbeat.main()
+                    self.assertEqual(self.api.calls, [])
+            finally:
+                os.chdir(previous)
 
     def test_shared_sync_selects_only_the_opted_in_heartbeat(self):
         source = (ROOT / ".github/scripts/sync-selected-paths.sh").read_text()
