@@ -5,6 +5,9 @@ on:
     branches: [main, master]
     paths:
       - ".github/scripts/checked-bot-merge.py"
+      - ".github/scripts/branch-heartbeat.py"
+      - ".github/scripts/sync-selected-paths.sh"
+      - ".github/workflow-templates/**"
       - ".github/tests/**"
       - ".github/workflows/ci.yml"
       - ".github/workflows/*auto-merge*.yml"
@@ -24,5 +27,5 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
-      - name: Test shared merge policy
+      - name: Test shared maintenance policies
         run: python3 -m unittest discover -s .github/tests -v

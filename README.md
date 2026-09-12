@@ -115,7 +115,10 @@ Two layers stop new Git LFS bloat:
 
 ## Bot PR auto-merge
 
-Bot PRs merge automatically. Both workflows use `GH_PAT` with `--admin` to bypass branch protection:
+Bot PRs use the checked merge policy described below. Both workflows require a
+successful required application Build check and merge the verified head without
+bypassing branch protection. The portfolio rollout keeps unverified downstream
+automation disabled until each application's checks are configured.
 
 | Bot | Workflow |
 |-----|----------|
@@ -214,6 +217,33 @@ constitute verification or authorization to re-enable it automatically.
 - Preserve unlisted dot items, editor workspaces, skills and documentation.
 - Merge shared template directories while preserving custom forms.
 - Maintain the marked `.gitignore` block without deleting application files.
+
+## Heartbeats without Vercel deployments
+
+The legacy heartbeat writes a timestamp to the default branch. Its `[skip ci]`
+message suppresses GitHub CI, but still caused Vercel production deployments.
+Root-directory Vercel apps can opt in with `.github/branch-heartbeat.json`
+containing `{"version":1,"rootDirectory":""}`. Shared sync then copies
+`.github/workflow-templates/branch-heartbeat.yml` to the app's existing heartbeat
+workflow and copies `.github/scripts/branch-heartbeat.py`. Other apps retain
+their existing heartbeat. Application CI and Vercel configuration remain owned
+by the app.
+
+The replacement schedule stays on the default branch but commits only to
+`automation/heartbeat`. The branch contains a timestamp, an ownership marker,
+and `vercel.json` with `git.deploymentEnabled:false`. It has separate history;
+normal updates preserve that history and never force-push. An existing branch
+with unexpected files, ownership or deployment settings is refused. The app's
+main `vercel.json` must also disable deployment of `automation/heartbeat` before
+the first run. Normal branches continue to deploy.
+
+Run the first heartbeat manually from main only after checking the app's Vercel
+root and production release. Verify the activity branch, unchanged main SHA,
+and absence of a Vercel deployment. No workflow is enabled or dispatched by the
+helper, so manually disabled jobs stay disabled. GitHub documents inactivity
+in terms of repository activity; this rollout still requires observation over
+the 60-day window before claiming long-term schedule continuity. Nested Vercel
+roots are intentionally not supported by this initial opt-in.
 
 ## License
 
