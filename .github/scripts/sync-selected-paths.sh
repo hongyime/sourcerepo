@@ -344,7 +344,7 @@ while read -r repo; do
   fi
 
   # Copy content from sourcerepo
-  # Only opted-in root-directory apps receive the activity-branch heartbeat.
+  # Only opted-in apps with a validated Vercel root receive the activity heartbeat.
   if [ -e ".github/branch-heartbeat.json" ] || [ -L ".github/branch-heartbeat.json" ]; then
     if ! python3 "$WORKDIR/.github/scripts/branch-heartbeat.py" --validate-config .github/branch-heartbeat.json; then
       echo "Invalid branch heartbeat opt-in for $FULL_NAME; skipping config sync" >&2

@@ -242,8 +242,17 @@ root and production release. Verify the activity branch, unchanged main SHA,
 and absence of a Vercel deployment. No workflow is enabled or dispatched by the
 helper, so manually disabled jobs stay disabled. GitHub documents inactivity
 in terms of repository activity; this rollout still requires observation over
-the 60-day window before claiming long-term schedule continuity. Nested Vercel
-roots are intentionally not supported by this initial opt-in.
+the 60-day window before claiming long-term schedule continuity.
+
+For a reviewed Vercel project rooted in one plain directory, use that name in
+the opt-in, for example `{"version":1,"rootDirectory":"web"}`. Put the
+`automation/heartbeat:false` branch rule in `web/vercel.json`, the actual
+project config. The isolated activity branch contains both root and nested
+disabled-deployment configs, and its ownership marker records the directory.
+Root changes, unexpected files or directory modes abort without replacing the
+existing branch. Absolute paths, traversal, multiple levels and hidden directory
+names are rejected. Verify the actual project root and the first hosted run;
+configuration checks alone do not prove Vercel suppressed the deployment.
 
 ## License
 
