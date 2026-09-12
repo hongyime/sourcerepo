@@ -316,6 +316,21 @@ while read -r repo; do
   fi
 
   # Copy content from sourcerepo
+  # Only opted-in root-directory apps receive the activity-branch heartbeat.
+  if [ -e ".github/branch-heartbeat.json" ] || [ -L ".github/branch-heartbeat.json" ]; then
+    if ! python3 "$WORKDIR/.github/scripts/branch-heartbeat.py" --validate-config .github/branch-heartbeat.json; then
+      echo "Invalid branch heartbeat opt-in for $FULL_NAME; skipping config sync" >&2
+      FAILED_REPOS+=("$REPO_NAME")
+      cd "$WORKDIR" || exit 1
+      if [ "$UNARCHIVED_HERE" = "true" ]; then
+        rearchive_repo "$FULL_NAME" || REARCHIVE_FAILED_REPOS+=("$REPO_NAME")
+      fi
+      continue
+    fi
+    EFFECTIVE_SYNC_ITEMS="${EFFECTIVE_SYNC_ITEMS/.github\/workflows\/heartbeat.yml|.github\/workflows\/heartbeat.yml/.github\/workflow-templates\/branch-heartbeat.yml|.github\/workflows\/heartbeat.yml}"
+    EFFECTIVE_SYNC_ITEMS+=$'\n.github/scripts/branch-heartbeat.py|.github/scripts/branch-heartbeat.py'
+  fi
+
   COPY_FAILED=false
   while IFS='|' read -r src dst; do
     [ -z "$src" ] && continue

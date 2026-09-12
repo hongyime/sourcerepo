@@ -27,3 +27,13 @@ Accepted portfolio upkeep: fix the verified early dependency merge and admin byp
 - [ ] Refresh public sites and publish the HTML/Markdown report with remaining rollout and free-tier limits.
 
 Local validation: 16 merge-policy/CI-ownership regression tests pass. Four changed workflow files parse. No application files or production data were changed. Downstream workflow activation remains pending repository-specific validation.
+
+
+2026-09-12 heartbeat/build-protection follow-up: inspect actual scheduled workflows before replacing direct heartbeat commits. Preserve manually disabled jobs and all existing collector behavior; never resume private/scanning services as a side effect.
+- [ ] Trace current heartbeat and shared sync behavior; identify repositories whose scheduled work is limited to repository maintenance.
+- [ ] Prove deployment waste from heartbeat commits and define a replacement without silently resuming collectors or manually disabled jobs.
+- [ ] Implement and test a bounded repair; preserve local edits, action restrictions and data collection behavior.
+- [ ] Release the shared repair and verify affected repository and production state.
+- [ ] Update the portfolio Markdown and HTML with measured progress and remaining limits.
+
+2026-09-12 heartbeat validation passed locally. Source policy tests and workflow parsing pass; the application pilot builds pass. Hosted PR checks, production matching and the first branch heartbeat are the next release gates. No broad sync or disabled workflow reactivation was run.
