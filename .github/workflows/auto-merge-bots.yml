@@ -4,7 +4,7 @@ name: Auto-merge Bot PRs
 # No polling runner: build/status completion or an explicit sweep re-evaluates.
 on:
   workflow_run:
-    workflows: ["Build Check", "TruffleHog Secret Scan", "Dependency Review", "CodeQL Analysis", "Bandit", "Semgrep", "LFS Guard"]
+    workflows: ["Build Check", "TruffleHog Secret Scan", "Dependency Review", "CodeQL", "CodeQL Analysis", "Bandit", "Semgrep", "LFS Guard"]
     types: [completed]
   status:
   workflow_dispatch:

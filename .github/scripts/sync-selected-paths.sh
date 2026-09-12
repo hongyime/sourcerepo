@@ -44,6 +44,23 @@ retry() {
   done
 }
 
+publish_sync_pr() {
+  local already_committed="$1"
+  local sync_branch="sync-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+  git checkout -b "$sync_branch" || return 1
+  # Required checks must run on review branches. Preserve skip-CI only for
+  # direct updates to unprotected branches, never for a pull request.
+  if [ "$already_committed" = "true" ]; then
+    git commit --amend -m "chore(config): sync from sourcerepo" || return 1
+  else
+    git commit -m "chore(config): sync from sourcerepo" || return 1
+  fi
+  git push origin "$sync_branch" || return 1
+  gh pr create --repo "$FULL_NAME" --title "$PR_TITLE" --body "$PR_BODY" \
+    --base "$DEFAULT_BRANCH" --head "$sync_branch" || return 1
+  echo "Opened PR for $REPO_NAME"
+}
+
 validate_copy_destination() {
   local src="$1" dst="$2" parent="$2"
   # A managed path must not redirect a copy through app-owned links.
@@ -272,6 +289,17 @@ while read -r repo; do
     continue
   fi
 
+  # Detect branch rules before cloning or changing archive state. Protected
+  # branches go straight to review instead of spending retries on a rejected
+  # direct push. An unreadable rule state must never imply an unprotected ref.
+  ENCODED_BRANCH="$(jq -rn --arg branch "$DEFAULT_BRANCH" '$branch | @uri')"
+  if ! BRANCH_PROTECTED="$(gh api "repos/$FULL_NAME/branches/$ENCODED_BRANCH" --jq '.protected')" ||
+      { [ "$BRANCH_PROTECTED" != "true" ] && [ "$BRANCH_PROTECTED" != "false" ]; }; then
+    echo "Cannot read branch protection for $FULL_NAME; skipping config sync" >&2
+    FAILED_REPOS+=("$REPO_NAME")
+    continue
+  fi
+
   # Temporarily unarchive so we can push to it.
   UNARCHIVED_HERE=false
   if [ "$ARCHIVED" = "true" ]; then
@@ -380,17 +408,17 @@ while read -r repo; do
   git add -A
 
   if [ -n "$(git status --porcelain)" ]; then
-    git commit -m "$COMMIT_MESSAGE"
-    if retry git push origin HEAD:"$DEFAULT_BRANCH"; then
-      echo "Pushed changes to $REPO_NAME"
+    if [ "$BRANCH_PROTECTED" = "true" ]; then
+      if ! publish_sync_pr false; then
+        echo "Review branch or PR creation failed for $REPO_NAME" >&2
+        PUSH_FAILED_REPOS+=("$REPO_NAME")
+      fi
     else
-      SYNC_BRANCH="sync-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-      git checkout -b "$SYNC_BRANCH"
-      if git push origin "$SYNC_BRANCH"; then
-        gh pr create --repo "$FULL_NAME" --title "$PR_TITLE" --body "$PR_BODY" --base "$DEFAULT_BRANCH" --head "$SYNC_BRANCH" || true
-        echo "Opened PR for $REPO_NAME"
-      else
-        echo "Push failed for $REPO_NAME"
+      git commit -m "$COMMIT_MESSAGE"
+      if retry git push origin HEAD:"$DEFAULT_BRANCH"; then
+        echo "Pushed changes to $REPO_NAME"
+      elif ! publish_sync_pr true; then
+        echo "Review branch or PR creation failed for $REPO_NAME" >&2
         PUSH_FAILED_REPOS+=("$REPO_NAME")
       fi
     fi
