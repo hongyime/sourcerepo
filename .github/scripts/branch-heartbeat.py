@@ -24,7 +24,7 @@ def validate_config(path: Path) -> None:
 
 def blob_sha(content: str) -> str:
     data = content.encode("utf-8")
-    return hashlib.sha1(f"blob {len(data)}\0".encode() + data).hexdigest()
+    return hashlib.sha1(f"blob {len(data)}\0".encode() + data, usedforsecurity=False).hexdigest()
 
 
 def validate_vercel(path: Path) -> None:
