@@ -231,6 +231,8 @@ jobs:
       # NOTE: All target-repo commits are made with `[skip ci]` in the message
       # so they do NOT fan-out and trigger CI/CodeQL/Scorecard in every downstream
       # repo. This was the biggest single source of Actions-minute waste.
+      # Application CI belongs to each repository; never replace it with the
+      # source repository's own build/test workflow.
       SYNC_ITEMS: |
         .github/dependabot_config.yml|.github/dependabot.yml
         .deepsource.toml|.deepsource.toml
@@ -242,7 +244,7 @@ jobs:
         .github/workflows/codeql.yml|.github/workflows/codeql.yml
         .github/workflows/scorecard.yml|.github/workflows/scorecard.yml
         .github/workflows/dependency-review.yml|.github/workflows/dependency-review.yml
-        .github/workflows/ci.yml|.github/workflows/ci.yml
+        .github/scripts/checked-bot-merge.py|.github/scripts/checked-bot-merge.py
         .github/ISSUE_TEMPLATE/bug_report.md|.github/ISSUE_TEMPLATE/bug_report.md
         .github/ISSUE_TEMPLATE/feature_request.md|.github/ISSUE_TEMPLATE/feature_request.md
         .github/pull_request_template.md|.github/pull_request_template.md
