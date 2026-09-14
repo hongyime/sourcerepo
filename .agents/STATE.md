@@ -1,3 +1,7 @@
+# Contribution convention repair - 2026-09-15
+
+Branch `fix/sync-pr-conventions`. The user requested repository-specific naming, branch and PR conventions. Config sync now prepares `chore/config-sync-*` branches and a single-line conventional title, and seeds contribution contracts only when absent. Existing AGENTS, CONTRIBUTING and PR templates, including case variants, are preserved. Reconciliation uses `chore/reconcile-repos`; new-repository requests use `chore/new-repo-request-*`. Local shell syntax, workflow parsing and all 29 shared-policy tests pass. Git Bash cannot run the disposable-repository fixtures on this Windows host because child process creation fails; all 21 fixtures now pass on hosted Linux, including both push and PR runs. Applicable security checks remain the release gate. No broad sync was dispatched.
+
 # Config-sync preservation — 2026-09-10
 
 The preservation fix is implemented on `maintenance/config-preservation-20260910`, based on published helper release `22d2798`. Source review found broad downstream deletion of documentation, skills, dot directories and editor workspaces; replacement of shared template directories also removed custom files. Topic API errors previously bypassed opt-outs.

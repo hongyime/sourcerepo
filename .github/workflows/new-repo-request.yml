@@ -186,7 +186,7 @@ jobs:
           if [ "$(cat .github/new-repo-ready)" != "yes" ]; then
             exit 0
           fi
-          branch="shell/new-repo-request-${ISSUE_NUMBER}"
+          branch="chore/new-repo-request-${ISSUE_NUMBER}"
           git config user.email "actions@github.com"
           git config user.name "GitHub Actions"
           git switch -c "$branch"

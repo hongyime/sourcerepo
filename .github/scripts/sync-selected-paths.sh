@@ -46,7 +46,8 @@ retry() {
 
 publish_sync_pr() {
   local already_committed="$1"
-  local sync_branch="sync-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+  local sync_branch="chore/config-sync-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+  local body_file="$SYNC_ROOT/pr-body.txt"
   git checkout -b "$sync_branch" || return 1
   # Required checks must run on review branches. Preserve skip-CI only for
   # direct updates to unprotected branches, never for a pull request.
@@ -56,7 +57,8 @@ publish_sync_pr() {
     git commit -m "chore(config): sync from sourcerepo" || return 1
   fi
   git push origin "$sync_branch" || return 1
-  gh pr create --repo "$FULL_NAME" --title "$PR_TITLE" --body "$PR_BODY" \
+  printf '%s\n' "$PR_BODY" > "$body_file" || return 1
+  gh pr create --repo "$FULL_NAME" --title "$PR_TITLE" --body-file "$body_file" \
     --base "$DEFAULT_BRANCH" --head "$sync_branch" || return 1
   echo "Opened PR for $REPO_NAME"
 }
@@ -362,6 +364,16 @@ while read -r repo; do
   COPY_FAILED=false
   while IFS='|' read -r src dst; do
     [ -z "$src" ] && continue
+    # Seed missing contribution contracts; an existing repo owns its rules.
+    # Keep case variants too, rather than replacing a custom local template.
+    case "${dst,,}" in
+      agents.md|contributing.md|.github/pull_request_template.md)
+        if [ -e "$dst" ] || [ -L "$dst" ] || [ -n "$(case_conflicting_paths "$dst")" ]; then
+          echo "Preserving repository contribution contract: $dst"
+          continue
+        fi
+        ;;
+    esac
     if should_skip_case_conflicting_sync "$dst"; then
       continue
     fi
