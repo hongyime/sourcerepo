@@ -1,5 +1,7 @@
 # JOURNAL
 
+2026-09-15: Preserve repository-selected Action references and SHA annotations during generic workflow updates; restrict all bulk-sync paths to hongyime and retain existing visibility unless explicitly configured. Validate with disposable fixtures before release.
+
 - 2026-08-09: Chose committed `.agents/STATE.md` plus `.agents/handoffs/` for
   cross-harness state because private harness stores do not survive tool
   switches or machine switches.

@@ -103,6 +103,8 @@ resume from X:\01 REPOSITORIES\_shell\PROGRESS.md
 
 ## 2026-09-12 — checked bot merges
 
+2026-09-15 shared-sync policy repair: regression fixtures now cover reviewed Action SHA pins, repository-selected versions and exclusion of held personal-account repositories. Hosted Linux execution must demonstrate the current overwrite before the structural preservation fix is applied. Keep unknown repository visibility unchanged. Preserve the original workspace edits and do not invoke the bulk settings, secret propagation or configuration sync jobs for testing. Resume details: `.agents/handoffs/20260915-sync-policies.json`.
+
 Accepted portfolio upkeep: fix the verified early dependency merge and admin bypass. Preserve the original workspace edits.
 
 - [x] Recheck all 27 Vercel projects and preserve unrelated local work.

@@ -190,6 +190,43 @@ exec "$PRAWN_REAL_GIT" "$@"
             with self.subTest(path=path):
                 self.assertEqual(self.blob(path), value)
 
+    def test_workflow_sync_preserves_reviewed_sha_and_annotation(self):
+        path = ".github/workflows/pinned.yml"
+        source = ("name: Shared\non: workflow_dispatch\njobs:\n  check:\n    runs-on: ubuntu-latest\n"
+                  "    steps:\n      - uses: actions/labeler@v6\n      - run: echo refreshed-policy\n")
+        pin = "bf12e9b00b37c5c0ca2b87b79b2daf7891dbda13"
+        target = source.replace("actions/labeler@v6", "actions/labeler@" + pin + " # v7.0.0")
+        target = target.replace("refreshed-policy", "old-policy")
+        self.write(self.source, path, source)
+        self.write(self.seed, path, target)
+        self.env["SYNC_ITEMS"] += f"\n{path}|{path}"
+        self.update_fixture_commit()
+        result = self.run_sync()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        actual = self.blob(path)
+        self.assertIn("actions/labeler@" + pin, actual)
+        self.assertIn("# v7.0.0", actual)
+        self.assertNotIn("actions/labeler@v6", actual)
+        self.assertIn("echo refreshed-policy", actual)
+
+    def test_workflow_sync_preserves_repository_action_version(self):
+        path = ".github/workflows/python.yml"
+        source = ("name: Shared\non: workflow_dispatch\njobs:\n  check:\n    runs-on: ubuntu-latest\n"
+                  "    steps:\n      - uses: actions/setup-python@v6\n        with:\n          python-version: '3.12'\n")
+        self.write(self.source, path, source)
+        self.write(self.seed, path, source.replace("setup-python@v6", "setup-python@v7"))
+        self.env["SYNC_ITEMS"] += f"\n{path}|{path}"
+        self.update_fixture_commit()
+        result = self.run_sync()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("setup-python@v7", self.blob(path))
+        self.assertNotIn("setup-python@v6", self.blob(path))
+
+    def test_sync_does_not_enumerate_held_personal_repositories(self):
+        result = self.run_sync()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("user/repos", self.logs.read_text())
+
     def test_directory_sync_keeps_custom_issue_forms(self):
         result = self.run_sync()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

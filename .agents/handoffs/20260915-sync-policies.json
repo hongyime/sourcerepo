@@ -1,0 +1,8 @@
+{
+  "task": "Preserve repository Action references and current ownership boundaries during shared configuration sync",
+  "branch": "fix/preserve-sync-policies",
+  "stage": "Hosted regression demonstration before implementation",
+  "findings": ["The shared copy overwrites reviewed SHA pins and repository-selected Action versions", "Repository enumeration includes personal-account repositories outside the accepted hongyime scope", "The settings job defaults unknown visibility to public"],
+  "plan": ["Prove Action-reference and ownership regressions with the existing disposable Git/fake GitHub fixtures", "Implement structural Action-reference preservation and owned-only enumeration", "Preserve current visibility where metadata does not explicitly select it", "Validate parser edge cases, real sync fixtures and settings behavior before ordinary PR release"],
+  "constraints": ["No live bulk sync for testing", "No real repository settings, secrets or archive operations in fixtures", "Preserve raw workspace changes", "Existing contribution and PR conventions remain repo-owned", "Free plans and retained data are preserved"]
+}
