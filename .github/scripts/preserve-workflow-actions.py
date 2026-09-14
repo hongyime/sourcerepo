@@ -73,8 +73,12 @@ def actions(text: str) -> tuple[list[Action], bool]:
             raise PolicyError("Action reference must be a string")
         if node.value.startswith(("./", "docker://")):
             return
-        match = re.fullmatch(r"([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_./-]+)*)@([^\s]+)", node.value)
-        if not match:
+        coordinate, separator, reference = node.value.partition("@")
+        parts = coordinate.split("/")
+        # Validate each segment once. Nested repetitions over slash-containing
+        # character classes can take exponential time on malformed references.
+        if (not separator or not reference or any(char.isspace() for char in reference)
+                or len(parts) < 2 or any(not re.fullmatch(r"[A-Za-z0-9_.-]+", part) for part in parts)):
             raise PolicyError("Unrecognized GitHub Action reference")
         token = scalar_tokens.get(node.end_mark.index)
         if token is None or token.style in ("|", ">") or token.start_mark.line != token.end_mark.line:
@@ -86,7 +90,7 @@ def actions(text: str) -> tuple[list[Action], bool]:
         tail = text[end:line_end].rstrip("\r")
         block_tail = bool(re.fullmatch(r"[ \t]*(?:#[^\n]*)?", tail))
         comment = tail.strip() if block_tail else ""
-        result.append(Action(job, identity, match[1].lower(), node.value,
+        result.append(Action(job, identity, coordinate.lower(), node.value,
                              token.start_mark.index, end, comment, line_end, block_tail))
 
     if "jobs" not in document:

@@ -1,7 +1,7 @@
 {
   "task": "Preserve repository Action references and current ownership boundaries during shared configuration sync",
   "branch": "fix/preserve-sync-policies",
-  "stage": "Implementation passes 15 Action parser, six mocked settings and 29 maintenance policy tests locally; hosted Linux integration verification pending",
+  "stage": "59 Linux fixtures passed on the first implementation; CodeQL identified a nested regex performance risk. Replaced it with single-pass segment validation and added a timeout-bounded malformed-input regression. Newly introduced Action defaults use verified upstream SHA pins. Recheck all hosted gates before release.",
   "regression_run": "https://github.com/hongyime/sourcerepo/actions/runs/34897097471",
   "regression_result": "21 existing tests passed; all three new overwrite/ownership tests failed before implementation",
   "implementation": ["Preserve repository GitHub Action references and annotations using structural YAML parsing", "Reject ambiguous or unsupported preservation before any push", "Restrict settings, secrets and config jobs to hongyime", "Omit unspecified visibility updates", "Keep repeated managed gitignore replacement stable"],

@@ -2,6 +2,7 @@
 import importlib.util
 from pathlib import Path
 import sys
+import subprocess
 import tempfile
 import unittest
 
@@ -20,6 +21,17 @@ def workflow(steps, job="build"):
 
 
 class WorkflowReferences(unittest.TestCase):
+    def test_long_malformed_reference_fails_promptly_without_touching_target(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source, target = Path(directory) / "source.yml", Path(directory) / "target.yml"
+            source.write_text(workflow("      - uses: " + "-/" * 20000 + "!\n"))
+            target.write_text("name: keep\njobs: {}\n")
+            result = subprocess.run([sys.executable, SPEC.origin, str(source), str(target)],
+                                    capture_output=True, text=True, timeout=5, check=False)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("Unrecognized GitHub Action", result.stderr)
+            self.assertEqual(target.read_text(), "name: keep\njobs: {}\n")
+
     def test_keeps_pin_annotation_and_new_template_logic(self):
         source = workflow("      - uses: actions/checkout@v7 # shared\n      - run: echo new\n")
         target = source.replace("@v7 # shared", "@" + PIN + " # reviewed v6").replace("echo new", "echo old")
