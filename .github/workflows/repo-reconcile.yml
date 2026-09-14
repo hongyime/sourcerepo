@@ -34,7 +34,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          branch="shell/reconcile-repos"
+          branch="chore/reconcile-repos"
           title="chore(shell): reconcile repo metadata"
 
           git config user.email "actions@github.com"

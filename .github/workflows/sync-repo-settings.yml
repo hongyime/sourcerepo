@@ -265,10 +265,25 @@ jobs:
         .github/workflows/bandit.yml|.github/workflows/bandit.yml
       COMMIT_MESSAGE: |
         chore(config): sync from sourcerepo [skip ci]
-      PR_TITLE: |
-        Sync General Configurations
+      PR_TITLE: 'chore(config): sync shared configuration'
       PR_BODY: |
-        Automated config sync from source repo.
+        ## Summary
+
+        Synchronize shared repository configuration from sourcerepo.
+
+        ## Changes
+
+        Update managed configuration while preserving repository contribution rules and application files.
+
+        ## Testing
+
+        Required checks run on this review branch. Inspect their results and the diff before merging.
+
+        ## Checklist
+
+        - [ ] Required checks pass for the current commit.
+        - [ ] Repository-specific configuration and contribution rules are preserved.
+        - [ ] The diff contains no secrets or unrelated application changes.
     steps:
       - uses: actions/checkout@v7
       - name: Install jq and GitHub CLI

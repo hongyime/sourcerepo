@@ -47,7 +47,7 @@ class ConfigSyncTests(unittest.TestCase):
             "GITHUB_REPOSITORY": "fixture/source", "GITHUB_RUN_ID": "1", "GITHUB_RUN_ATTEMPT": "1",
             "SYNC_ITEMS": "managed.txt|managed.txt\n.github/ISSUE_TEMPLATE|.github/ISSUE_TEMPLATE\n.gitattributes|.gitattributes\n.github/workflows/lfs-guard.yml|.github/workflows/lfs-guard.yml",
             "COMMIT_MESSAGE": "chore(config): fixture sync [skip ci]",
-            "PR_TITLE": "fixture", "PR_BODY": "fixture", "INCLUDE_ARCHIVED": "true",
+            "PR_TITLE": "chore(config): sync shared configuration", "PR_BODY": "fixture\n\nActual newlines stay intact.\n", "INCLUDE_ARCHIVED": "true",
             "PRAWN_REAL_GIT": Path(real_git).as_posix(), "PRAWN_BARE_REPO": self.bare.as_posix(),
             "PRAWN_GH_LOG": self.logs.as_posix(), "PRAWN_TEST_MODE": "normal",
             "PRAWN_TEST_TOPICS": "", "PRAWN_TEST_ARCHIVED": "false",
@@ -109,6 +109,19 @@ case "$1 $2" in
     exec "$PRAWN_REAL_GIT" clone "$PRAWN_BARE_REPO" "$4" ;;
   'pr create')
     [ "$PRAWN_TEST_MODE" != pr_error ] || exit 77
+    shift 2
+    title='' head='' body_file=''
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --title) title="$2"; shift 2 ;;
+        --head) head="$2"; shift 2 ;;
+        --body-file) body_file="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    [ "$title" = 'chore(config): sync shared configuration' ] || exit 78
+    [[ "$head" =~ ^chore/[a-z0-9]+(-[a-z0-9]+)*$ ]] || exit 79
+    [ -f "$body_file" ] && [ "$(cat "$body_file")" = "${PR_BODY%$'\\n'}" ] || exit 80
     printf 'https://github.com/fixture/target/pull/1\\n' ;;
   *) echo 'Unexpected fake GitHub operation' >&2; exit 94 ;;
 esac
@@ -183,6 +196,42 @@ exec "$PRAWN_REAL_GIT" "$@"
         self.assertEqual(self.blob(".github/ISSUE_TEMPLATE/bug.yml"), "shared issue form\n")
         self.assertEqual(self.blob(".github/ISSUE_TEMPLATE/local.yml"), "custom local issue form\n")
 
+    def test_sync_preserves_repository_contribution_contracts(self):
+        contracts = ("AGENTS.md", "CONTRIBUTING.md", ".github/pull_request_template.md")
+        for path in contracts:
+            self.write(self.source, path, "generic shared rules\n")
+            self.write(self.seed, path, "repo-specific rules, naming and review requirements\n")
+            self.env["SYNC_ITEMS"] += f"\n{path}|{path}"
+        self.update_fixture_commit()
+        result = self.run_sync()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for path in contracts:
+            self.assertEqual(self.blob(path), "repo-specific rules, naming and review requirements\n")
+
+    def test_sync_seeds_missing_contribution_contracts(self):
+        for path in ("AGENTS.md", "CONTRIBUTING.md", ".github/pull_request_template.md"):
+            self.write(self.source, path, "initial shared rules\n")
+            self.env["SYNC_ITEMS"] += f"\n{path}|{path}"
+        result = self.run_sync()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for path in ("AGENTS.md", "CONTRIBUTING.md", ".github/pull_request_template.md"):
+            self.assertEqual(self.blob(path), "initial shared rules\n")
+
+    def test_sync_preserves_case_variant_contribution_contracts(self):
+        for path in ("agents.md", "contributing.md", ".github/PULL_REQUEST_TEMPLATE.md"):
+            self.write(self.seed, path, "custom case-variant rules\n")
+        for path in ("AGENTS.md", "CONTRIBUTING.md", ".github/pull_request_template.md"):
+            self.write(self.source, path, "generic shared rules\n")
+            self.env["SYNC_ITEMS"] += f"\n{path}|{path}"
+        self.update_fixture_commit()
+        result = self.run_sync()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for path in ("agents.md", "contributing.md", ".github/PULL_REQUEST_TEMPLATE.md"):
+            self.assertEqual(self.blob(path), "custom case-variant rules\n")
+        tracked = self.git("ls-tree", "-r", "--name-only", "main", cwd=self.bare).stdout.splitlines()
+        for path in ("AGENTS.md", "CONTRIBUTING.md", ".github/pull_request_template.md"):
+            self.assertNotIn(path, tracked)
+
     def test_topics_failure_skips_before_clone_or_archive_change(self):
         result = self.run_sync(mode="topics_error", archived=True)
         self.assertNotEqual(result.returncode, 0, result.stdout)
@@ -225,11 +274,11 @@ exec "$PRAWN_REAL_GIT" "$@"
 
     def assert_review_branch(self):
         self.assertEqual(self.git("rev-parse", "main", cwd=self.bare).stdout.strip(), self.original_head)
-        self.assertEqual(self.git("rev-parse", "sync-1-1^", cwd=self.bare).stdout.strip(), self.original_head)
-        self.assertEqual(self.git("show", "-s", "--format=%B", "sync-1-1", cwd=self.bare).stdout.strip(), "chore(config): sync from sourcerepo")
-        self.assertEqual(self.git("show", "sync-1-1:managed.txt", cwd=self.bare).stdout, "new shared config\n")
+        self.assertEqual(self.git("rev-parse", "chore/config-sync-1-1^", cwd=self.bare).stdout.strip(), self.original_head)
+        self.assertEqual(self.git("show", "-s", "--format=%B", "chore/config-sync-1-1", cwd=self.bare).stdout.strip(), "chore(config): sync from sourcerepo")
+        self.assertEqual(self.git("show", "chore/config-sync-1-1:managed.txt", cwd=self.bare).stdout, "new shared config\n")
         for path, value in self.preserved.items():
-            self.assertEqual(self.git("show", "sync-1-1:" + path, cwd=self.bare).stdout, value)
+            self.assertEqual(self.git("show", "chore/config-sync-1-1:" + path, cwd=self.bare).stdout, value)
 
     def test_protected_branch_uses_review_without_a_direct_push(self):
         result = self.run_sync(protected=True)
