@@ -43,8 +43,8 @@ class ConfigSyncTests(unittest.TestCase):
             "TMPDIR": (self.base / "tmp").as_posix(),
             "GIT_CONFIG_GLOBAL": (self.base / "gitconfig").as_posix(),
             "GIT_CONFIG_NOSYSTEM": "1", "GIT_ALLOW_PROTOCOL": "file",
-            "GIT_TERMINAL_PROMPT": "0", "GITHUB_REPOSITORY_OWNER": "fixture",
-            "GITHUB_REPOSITORY": "fixture/source", "GITHUB_RUN_ID": "1", "GITHUB_RUN_ATTEMPT": "1",
+            "GIT_TERMINAL_PROMPT": "0", "GITHUB_REPOSITORY_OWNER": "hongyime",
+            "GITHUB_REPOSITORY": "hongyime/source", "GITHUB_RUN_ID": "1", "GITHUB_RUN_ATTEMPT": "1",
             "SYNC_ITEMS": "managed.txt|managed.txt\n.github/ISSUE_TEMPLATE|.github/ISSUE_TEMPLATE\n.gitattributes|.gitattributes\n.github/workflows/lfs-guard.yml|.github/workflows/lfs-guard.yml",
             "COMMIT_MESSAGE": "chore(config): fixture sync [skip ci]",
             "PR_TITLE": "chore(config): sync shared configuration", "PR_BODY": "fixture\n\nActual newlines stay intact.\n", "INCLUDE_ARCHIVED": "true",
@@ -56,11 +56,13 @@ class ConfigSyncTests(unittest.TestCase):
         script = Path(os.environ.get("PRAWN_CONFIG_SYNC_SCRIPT", ROOT / ".github/scripts/sync-selected-paths.sh"))
         self.script = self.source / "sync.sh"
         self.script.write_text(script.read_text(encoding="utf-8"), encoding="utf-8", newline="\n")
+        self.write(self.source, ".github/scripts/preserve-workflow-actions.py",
+                   (ROOT / ".github/scripts/preserve-workflow-actions.py").read_text(encoding="utf-8"))
         for name, value in {
             "managed.txt": "new shared config\n",
             ".github/ISSUE_TEMPLATE/bug.yml": "shared issue form\n",
             ".gitattributes": "shared attributes\n",
-            ".github/workflows/lfs-guard.yml": "shared LFS guard\n",
+            ".github/workflows/lfs-guard.yml": "name: shared LFS guard\njobs: {}\n",
         }.items():
             self.write(self.source, name, value)
         self.preserved = {
@@ -75,7 +77,7 @@ class ConfigSyncTests(unittest.TestCase):
         }
         for name, value in {**self.preserved, "managed.txt": "old shared config\n",
                             ".gitattributes": "app LFS attributes\n",
-                            ".github/workflows/lfs-guard.yml": "app LFS policy\n"}.items():
+                            ".github/workflows/lfs-guard.yml": "name: app LFS policy\njobs: {}\n"}.items():
             self.write(self.seed, name, value)
         self.git("init", "--initial-branch=main", cwd=self.seed)
         self.git("add", "-A", cwd=self.seed)
@@ -89,23 +91,23 @@ case "$1 $2" in
   'api --paginate')
     if [[ "$3" == orgs/* ]]; then
       [ "$PRAWN_TEST_MODE" != org_error ] || exit 71
-      printf '[{"name":"target","full_name":"fixture/target","owner":{"login":"fixture"},"archived":%s,"disabled":false,"fork":false,"default_branch":"main"}]\\n' "$PRAWN_TEST_ARCHIVED"
+      printf '[{"name":"target","full_name":"hongyime/target","owner":{"login":"hongyime"},"archived":%s,"disabled":false,"fork":false,"default_branch":"main"}]\\n' "$PRAWN_TEST_ARCHIVED"
     elif [[ "$3" == user/repos* ]]; then
       [ "$PRAWN_TEST_MODE" != personal_error ] || exit 72
       printf '[]\\n'
     else exit 90; fi ;;
-  'api repos/fixture/target/topics')
+  'api repos/hongyime/target/topics')
     [ "$PRAWN_TEST_MODE" != topics_error ] || exit 73
     printf '%s\\n' "$PRAWN_TEST_TOPICS" ;;
-  'api repos/fixture/target/branches/main')
+  'api repos/hongyime/target/branches/main')
     [ "$PRAWN_TEST_MODE" != protection_error ] || exit 76
     if [ "$PRAWN_TEST_MODE" = invalid_protection ]; then printf 'unknown\\n'
     else printf '%s\\n' "$PRAWN_TEST_PROTECTED"; fi ;;
   'api -X')
-    [ "$3" = PATCH ] && [ "$4" = repos/fixture/target ] || exit 91
+    [ "$3" = PATCH ] && [ "$4" = repos/hongyime/target ] || exit 91
     case "$6" in archived=true|archived=false) exit 0;; *) exit 92;; esac ;;
   'repo clone')
-    [ "$3" = fixture/target ] || exit 93
+    [ "$3" = hongyime/target ] || exit 93
     exec "$PRAWN_REAL_GIT" clone "$PRAWN_BARE_REPO" "$4" ;;
   'pr create')
     [ "$PRAWN_TEST_MODE" != pr_error ] || exit 77
@@ -122,7 +124,7 @@ case "$1 $2" in
     [ "$title" = 'chore(config): sync shared configuration' ] || exit 78
     [[ "$head" =~ ^chore/[a-z0-9]+(-[a-z0-9]+)*$ ]] || exit 79
     [ -f "$body_file" ] && [ "$(cat "$body_file")" = "${PR_BODY%$'\\n'}" ] || exit 80
-    printf 'https://github.com/fixture/target/pull/1\\n' ;;
+    printf 'https://github.com/hongyime/target/pull/1\\n' ;;
   *) echo 'Unexpected fake GitHub operation' >&2; exit 94 ;;
 esac
 ''')
@@ -190,6 +192,43 @@ exec "$PRAWN_REAL_GIT" "$@"
             with self.subTest(path=path):
                 self.assertEqual(self.blob(path), value)
 
+    def test_workflow_sync_preserves_reviewed_sha_and_annotation(self):
+        path = ".github/workflows/pinned.yml"
+        source = ("name: Shared\non: workflow_dispatch\njobs:\n  check:\n    runs-on: ubuntu-latest\n"
+                  "    steps:\n      - uses: actions/labeler@v6\n      - run: echo refreshed-policy\n")
+        pin = "bf12e9b00b37c5c0ca2b87b79b2daf7891dbda13"
+        target = source.replace("actions/labeler@v6", "actions/labeler@" + pin + " # v7.0.0")
+        target = target.replace("refreshed-policy", "old-policy")
+        self.write(self.source, path, source)
+        self.write(self.seed, path, target)
+        self.env["SYNC_ITEMS"] += f"\n{path}|{path}"
+        self.update_fixture_commit()
+        result = self.run_sync()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        actual = self.blob(path)
+        self.assertIn("actions/labeler@" + pin, actual)
+        self.assertIn("# v7.0.0", actual)
+        self.assertNotIn("actions/labeler@v6", actual)
+        self.assertIn("echo refreshed-policy", actual)
+
+    def test_workflow_sync_preserves_repository_action_version(self):
+        path = ".github/workflows/python.yml"
+        source = ("name: Shared\non: workflow_dispatch\njobs:\n  check:\n    runs-on: ubuntu-latest\n"
+                  "    steps:\n      - uses: actions/setup-python@v6\n        with:\n          python-version: '3.12'\n")
+        self.write(self.source, path, source)
+        self.write(self.seed, path, source.replace("setup-python@v6", "setup-python@v7"))
+        self.env["SYNC_ITEMS"] += f"\n{path}|{path}"
+        self.update_fixture_commit()
+        result = self.run_sync()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("setup-python@v7", self.blob(path))
+        self.assertNotIn("setup-python@v6", self.blob(path))
+
+    def test_sync_does_not_enumerate_held_personal_repositories(self):
+        result = self.run_sync()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("user/repos", self.logs.read_text())
+
     def test_directory_sync_keeps_custom_issue_forms(self):
         result = self.run_sync()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -247,16 +286,52 @@ exec "$PRAWN_REAL_GIT" "$@"
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assert_untouched()
 
-    def test_personal_enumeration_failure_aborts_before_changes(self):
+    def test_personal_api_is_never_needed(self):
         result = self.run_sync(mode="personal_error")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("user/repos", self.logs.read_text())
+
+    def test_wrong_source_owner_aborts_before_changes(self):
+        self.env["GITHUB_REPOSITORY_OWNER"] = "held-account"
+        result = self.run_sync()
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assert_untouched()
+
+    def test_unowned_api_result_is_not_cloned_or_mutated(self):
+        fake = self.bin / "gh"
+        fake.write_text(fake.read_text().replace('"login":"hongyime"', '"login":"held-account"'))
+        result = self.run_sync(archived=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assert_untouched()
+
+    def test_workflow_directory_preserves_pin_and_second_sync_is_idempotent(self):
+        path = ".github/workflows/pinned.yml"
+        shared = "jobs: {check: {steps: [{uses: actions/checkout@v6}]}}\n"
+        self.write(self.source, path, shared)
+        self.write(self.seed, path, shared.replace("@v6", "@" + "a" * 40))
+        self.env["SYNC_ITEMS"] += "\n.github/workflows|.github/workflows"
+        self.update_fixture_commit()
+        result = self.run_sync()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("@" + "a" * 40, self.blob(path))
+        head = self.git("rev-parse", "main", cwd=self.bare).stdout
+        result = self.run_sync()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.git("rev-parse", "main", cwd=self.bare).stdout, head)
+
+    def test_invalid_workflow_is_not_pushed_and_archive_is_restored(self):
+        self.write(self.seed, ".github/workflows/lfs-guard.yml", "jobs: [invalid\n")
+        self.update_fixture_commit()
+        result = self.run_sync(archived=True)
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(self.git("rev-parse", "main", cwd=self.bare).stdout.strip(), self.original_head)
+        self.assertTrue(self.logs.read_text().rstrip().endswith("archived=true"))
 
     def test_keep_lfs_preserves_existing_lfs_policy(self):
         result = self.run_sync(topics="keep-lfs")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(self.blob(".gitattributes"), "app LFS attributes\n")
-        self.assertEqual(self.blob(".github/workflows/lfs-guard.yml"), "app LFS policy\n")
+        self.assertEqual(self.blob(".github/workflows/lfs-guard.yml"), "name: app LFS policy\njobs: {}\n")
         self.assertEqual(self.blob("managed.txt"), "new shared config\n")
 
     def test_archived_repo_is_restored_after_success(self):
@@ -284,7 +359,7 @@ exec "$PRAWN_REAL_GIT" "$@"
         result = self.run_sync(protected=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assert_review_branch()
-        self.assertIn("pr create --repo fixture/target", self.logs.read_text())
+        self.assertIn("pr create --repo hongyime/target", self.logs.read_text())
         self.assertNotIn("push origin HEAD:main", (self.base / "git-calls.txt").read_text())
         self.assertIn("Opened PR for target", result.stdout)
 
@@ -298,7 +373,7 @@ exec "$PRAWN_REAL_GIT" "$@"
         result = self.run_sync(mode="main_push_error")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assert_review_branch()
-        self.assertIn("pr create --repo fixture/target", self.logs.read_text())
+        self.assertIn("pr create --repo hongyime/target", self.logs.read_text())
 
     def test_unreadable_protection_fails_before_clone_or_archive_change(self):
         result = self.run_sync(mode="protection_error", archived=True)

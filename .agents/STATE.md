@@ -103,6 +103,8 @@ resume from X:\01 REPOSITORIES\_shell\PROGRESS.md
 
 ## 2026-09-12 — checked bot merges
 
+2026-09-15 shared-sync policy repair: hosted Linux run 34897097471 reproduced all three pin/version/ownership regressions while 21 existing fixtures passed. Structural preservation, hongyime-only scope and unspecified visibility retention are implemented. Local checks pass: 15 Action-reference cases, six mocked settings cases and 29 maintenance policies. The full disposable Git/Linux suite must pass on the new PR #55 head before release. Unsupported/ambiguous YAML stops copying without a push; explicit Action upgrades remain repository reviews. Preserve the original workspace edits and do not invoke bulk settings, secrets or config jobs for testing. Resume details: `.agents/handoffs/20260915-sync-policies.json`.
+
 Accepted portfolio upkeep: fix the verified early dependency merge and admin bypass. Preserve the original workspace edits.
 
 - [x] Recheck all 27 Vercel projects and preserve unrelated local work.

@@ -218,6 +218,27 @@ constitute verification or authorization to re-enable it automatically.
 - Merge shared template directories while preserving custom forms.
 - Maintain the marked `.gitignore` block without deleting application files.
 
+Shared settings, secrets and config sync are restricted to owned `hongyime`
+repositories; personal-account repositories and forks are excluded. Settings
+without an explicit `public` or `private` visibility retain their current
+visibility. Repository contribution rules, PR templates and reviewed Action
+references remain owned by the target repository.
+
+Workflow sync parses actual job and step `uses` fields with PyYAML 6.0.3 and
+retains the existing GitHub Action reference and inline annotation while copying
+new template logic. It matches step IDs/names and job IDs before using an
+unambiguous reference for the same Action. Action upgrades belong in explicit
+repository reviews or Dependabot PRs. New Actions use the source template.
+Malformed YAML, duplicate/merged keys, ambiguous matches and reference changes
+in anchored workflows stop that repository's copy before any push. Annotated
+references that cannot fit a flow mapping also require manual reconciliation;
+they are never silently downgraded. Local and Docker actions follow the template.
+
+Run `python -m pip install PyYAML==6.0.3`, then
+`python -m unittest discover -s tests -v` on Linux with Node, Bash, Git and jq.
+The suite uses disposable repositories and a fake GitHub CLI/API. Do not dispatch
+the live bulk settings or secret workflow to validate a code change.
+
 ## Heartbeats without Vercel deployments
 
 The legacy heartbeat writes a timestamp to the default branch. Its `[skip ci]`

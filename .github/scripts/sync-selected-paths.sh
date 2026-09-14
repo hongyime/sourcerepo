@@ -5,6 +5,12 @@ set -euo pipefail
 # direct manual invocation of this script hits every non-disabled repo.
 INCLUDE_ARCHIVED="${INCLUDE_ARCHIVED:-true}"
 
+# The accepted portfolio scope is the hongyime organization only.
+if [ "${GITHUB_REPOSITORY_OWNER,,}" != "hongyime" ]; then
+  echo "Config sync is restricted to hongyime" >&2
+  exit 1
+fi
+
 git config --global user.email "actions@github.com"
 git config --global user.name "GitHub Actions Sync"
 
@@ -18,16 +24,10 @@ REARCHIVE_FAILED_REPOS=()
 declare -A CASE_PATHS_BY_LOWER=()
 CASE_PATHS_READY=false
 
-# Combined repo list: hongyime org repos + personal-account owned repos.
-# Personal repos are the profile README + Pages site (kept under the personal
-# account because GitHub's magic profile/pages only render at the matching user
-# path). Any future personal-account repos are picked up automatically.
-# Fetch separately: an earlier failure inside a command group must not be
-# hidden by a successful later request and reported as a complete sync.
+# Fetch completely before any repository mutation; never enumerate personal repos.
 ORG_REPOS_JSON="$(gh api --paginate "orgs/hongyime/repos?per_page=100")"
-PERSONAL_REPOS_JSON="$(gh api --paginate "user/repos?per_page=100&affiliation=owner")"
-REPOS_JSON="$(printf '%s\n%s\n' "$ORG_REPOS_JSON" "$PERSONAL_REPOS_JSON" |
-  jq -s 'add | unique_by(.full_name) | map(select(.disabled == false and .fork == false))')"
+REPOS_JSON="$(printf '%s\n' "$ORG_REPOS_JSON" |
+  jq -s 'add | unique_by(.full_name) | map(select((.owner.login | ascii_downcase) == "hongyime" and .disabled == false and .fork == false))')"
 
 GITIGNORE_MARKER="# AI / editor dot directories (managed via sourcerepo)"
 GITIGNORE_END_MARKER="# End AI / editor dot directories (managed via sourcerepo)"
@@ -90,7 +90,12 @@ copy_if_exists() {
   if [ -f "$src" ]; then
     validate_copy_destination "$src" "$dst" || return 1
     mkdir -p "$dst_dir" || return 1
-    cp -f "$src" "$dst" || return 1
+    case "$dst" in
+      .github/workflows/*.yml|.github/workflows/*.yaml)
+        python3 "$WORKDIR/.github/scripts/preserve-workflow-actions.py" "$src" "$dst" || return 1
+        ;;
+      *) cp -f "$src" "$dst" || return 1 ;;
+    esac
     echo "Copied file $src -> $dst"
   elif [ -d "$src" ]; then
     validate_copy_destination "$src" "$dst" || return 1
@@ -101,7 +106,9 @@ copy_if_exists() {
       validate_copy_destination "$entry" "$dst/${entry#"$src"/}" || return 1
     done < <(find "$src" -mindepth 1 -print0)
     mkdir -p "$dst" || return 1
-    cp -r "$src/." "$dst/" || return 1
+    while IFS= read -r -d '' entry; do
+      copy_if_exists "$entry" "$dst/${entry##*/}" || return 1
+    done < <(find "$src" -mindepth 1 -maxdepth 1 -print0)
     echo "Copied directory $src -> $dst"
   else
     echo "Source missing, skipping copy: $src"
@@ -194,8 +201,11 @@ inject_gitignore_entries() {
     fi
     mv "$cleaned" .gitignore
   fi
+  # Replacing the managed block must not accumulate blank lines on each run.
+  if [ -s .gitignore ] && [ -n "$(tail -n 1 .gitignore)" ]; then
+    printf '\n' >> .gitignore
+  fi
   cat >> .gitignore << 'GITIGNORE_BLOCK'
-
 # AI / editor dot directories (managed via sourcerepo)
 .*
 !.github/
@@ -261,6 +271,11 @@ while read -r repo; do
   FORKED="$(echo "$repo" | jq -r '.fork')"
   DEFAULT_BRANCH="$(echo "$repo" | jq -r '.default_branch')"
   FULL_NAME="$REPO_OWNER/$REPO_NAME"
+
+  if [ "${REPO_OWNER,,}" != "hongyime" ] || [[ ! "$REPO_NAME" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+    echo "Skipping repository outside ownership scope: $FULL_NAME"
+    continue
+  fi
 
   # Disabled repos still cannot be interacted with (different from archived).
   if [ "$DISABLED" = "true" ] || [ "$FORKED" = "true" ]; then
