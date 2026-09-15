@@ -8,6 +8,8 @@ on:
       - '.github/scripts/preserve-workflow-actions.py'
       - '.github/workflows/sync-repo-settings.yml'
       - 'tests/test_*.py'
+      - 'tools/reconcile_repos.py'
+      - '.github/workflows/repo-reconcile.yml'
       - '.github/workflows/config-sync-tests.yml'
   pull_request:
     paths:
@@ -15,6 +17,8 @@ on:
       - '.github/scripts/preserve-workflow-actions.py'
       - '.github/workflows/sync-repo-settings.yml'
       - 'tests/test_*.py'
+      - 'tools/reconcile_repos.py'
+      - '.github/workflows/repo-reconcile.yml'
       - '.github/workflows/config-sync-tests.yml'
 
 permissions:
