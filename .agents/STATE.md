@@ -1,3 +1,14 @@
+# Current catalog registration - 2026-09-15
+
+PR #53 on `chore/reconcile-repos` is refreshed from current main while retaining
+the original proposal in Git history. ConnectSphere, Prawn Skills and Prawn Split
+are verified owned, active, non-fork repositories and are added to the catalog
+and standard tier. All 76 existing catalog records and existing tier entries
+are preserved. Metadata matches the live organization inventory and repeating
+the import leaves both files unchanged. The inaccessible scb446 placeholder was
+never on main and remains in the old proposal's history. Hosted validation is
+required before release; no app, target repository or live sync was changed.
+
 # Reconciliation review preservation - 2026-09-15
 
 Branch `fix/reconciliation-review` restricts discovery to hongyime, retains

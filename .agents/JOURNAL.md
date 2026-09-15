@@ -53,3 +53,5 @@ Local validation: 16 merge-policy/CI-ownership regression tests pass. Four chang
 2026-09-15: Preserve repository-reviewed Action refs and annotations during shared sync; ambiguous YAML fails before push. Scope every bulk job to hongyime and retain unspecified visibility. Regression evidence precedes implementation; Linux fake-API fixtures are the release gate, never a live bulk dispatch.
 
 2026-09-15: Reconciliation must retain pending review branches and PR descriptions, discover only hongyime and treat inaccessible inventory as unresolved. New proposals use unique conventional branches and ordinary pushes; catalog records are never removed by this workflow.
+
+2026-09-15: Refresh the existing catalog review by merging current main and registering three verified owned repositories. Preserve all existing records and proposal history; skip the inaccessible, never-released scb446 placeholder without inferring deletion.
