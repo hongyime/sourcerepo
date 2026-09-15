@@ -14,7 +14,7 @@ echo Initiating Zero-Install Repository Synchronization...
 echo Repeatable/idempotent: safe to run multiple times.
 echo This pulls updates by fetch + fast-forward. Current repos stay unchanged.
 echo.
-set "SYNC_ARGS=--command-timeout 8"
+set "SYNC_ARGS=--command-timeout 30"
 if "%DRY_RUN%"=="1" set "SYNC_ARGS=%SYNC_ARGS% --dry-run"
 if not "%SYNC_ONLY%"=="" set "SYNC_ARGS=%SYNC_ARGS% --only %SYNC_ONLY%"
 if "%DRY_RUN%"=="1" goto RUN_SYNC

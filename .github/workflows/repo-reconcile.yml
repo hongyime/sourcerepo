@@ -15,48 +15,60 @@ permissions:
 
 jobs:
   reconcile:
+    if: github.repository == 'hongyime/sourcerepo'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       GH_TOKEN: ${{ secrets.GH_PAT || github.token }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Preserve pending reconciliation reviews
+        id: review
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls?state=open&per_page=100" > "$RUNNER_TEMP/reconcile-open-prs.json"
+          jq -e 'type == "array" and all(.[]; type == "array" and all(.[]; (.head.ref | type) == "string" and (.head.repo.full_name | type) == "string"))' "$RUNNER_TEMP/reconcile-open-prs.json" > /dev/null
+          if jq -e --arg repo "$GITHUB_REPOSITORY" 'any(.[][]; .head.repo.full_name == $repo and (.head.ref | test("^(chore|shell)/reconcile-repos(-[0-9]+-[0-9]+)?$")))' "$RUNNER_TEMP/reconcile-open-prs.json" > /dev/null; then
+            echo "pending=true" >> "$GITHUB_OUTPUT"
+            echo "An existing reconciliation PR needs review; its branch and description are preserved."
+          else
+            echo "pending=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Reconcile repo metadata
+        if: steps.review.outputs.pending == 'false'
         shell: bash
         run: |
           set -euo pipefail
           python tools/reconcile_repos.py \
             --org-owner "$GITHUB_REPOSITORY_OWNER" \
             --write \
-            --report .github/repo-reconcile-summary.md
+            --report .github/repo-reconcile-summary.txt
 
-      - name: Open or update reconciliation PR
+      - name: Open a new reconciliation PR
+        if: steps.review.outputs.pending == 'false'
         shell: bash
         run: |
           set -euo pipefail
-          branch="shell/reconcile-repos"
+          [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ && "$GITHUB_RUN_ATTEMPT" =~ ^[0-9]+$ ]]
+          branch="chore/reconcile-repos-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           title="chore(shell): reconcile repo metadata"
 
           git config user.email "actions@github.com"
           git config user.name "GitHub Actions"
 
           if [ -z "$(git status --porcelain repos.yml tiers.yml)" ]; then
-            existing="$(gh pr list --head "$branch" --state open --json url --jq '.[0].url // empty')"
-            if [ -n "$existing" ]; then
-              gh pr close "$existing" --delete-branch --comment "No repo reconciliation changes remain."
-            fi
-            cat .github/repo-reconcile-summary.md
+            cat .github/repo-reconcile-summary.txt
             exit 0
           fi
 
           git switch -c "$branch"
           git add repos.yml tiers.yml
           git commit -m "$title"
-          git push -u origin "$branch" --force-with-lease
-
-          existing="$(gh pr list --head "$branch" --state open --json url --jq '.[0].url // empty')"
-          if [ -n "$existing" ]; then
-            gh pr edit "$existing" --title "$title" --body-file .github/repo-reconcile-summary.md
-          else
-            gh pr create --title "$title" --body-file .github/repo-reconcile-summary.md --base main --head "$branch"
-          fi
+          git push -u origin "$branch"
+          gh pr create --title "$title" --body-file .github/repo-reconcile-summary.txt --base "$DEFAULT_BRANCH" --head "$branch"

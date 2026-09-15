@@ -21,6 +21,7 @@ from typing import Any
 
 REPO_KEY = re.compile(r"^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+):\s*$")
 TIER_NAMES = ("external", "archived", "showcase", "standard")
+UPKEEP_OWNER = "hongyime"
 
 
 @dataclass(frozen=True)
@@ -127,12 +128,6 @@ def parse_topic_vocab(path: Path) -> set[str]:
     return allowed
 
 
-def known_metadata_owners(repos: dict[str, dict[str, Any]], org_owner: str) -> list[str]:
-    owners = {full_name.split("/", 1)[0] for full_name in repos if "/" in full_name}
-    owners.discard(org_owner)
-    return sorted(owners)
-
-
 def api_json(path: str) -> list[dict[str, Any]]:
     raw = run(["gh", "api", "--paginate", path], timeout=120)
     pages: list[Any] = []
@@ -147,9 +142,12 @@ def api_json(path: str) -> list[dict[str, Any]]:
         pages.append(page)
         index = offset
     repos: list[dict[str, Any]] = []
+    if not pages:
+        raise ValueError("Repository discovery returned no JSON pages")
     for page in pages:
-        if isinstance(page, list):
-            repos.extend(item for item in page if isinstance(item, dict))
+        if not isinstance(page, list) or any(not isinstance(item, dict) for item in page):
+            raise ValueError("Repository discovery returned an invalid page")
+        repos.extend(page)
     return repos
 
 
@@ -169,20 +167,14 @@ def live_repo_from_api(item: dict[str, Any]) -> LiveRepo | None:
     )
 
 
-def discover_live_repos(owners: list[str]) -> dict[str, LiveRepo]:
+def discover_live_repos(owner: str) -> dict[str, LiveRepo]:
     live: dict[str, LiveRepo] = {}
-    org_owner = owners[0]
-    for item in api_json(f"orgs/{org_owner}/repos?per_page=100"):
+    if owner != UPKEEP_OWNER:
+        raise ValueError("Repository upkeep is restricted to hongyime")
+    for item in api_json(f"orgs/{owner}/repos?per_page=100"):
         repo = live_repo_from_api(item)
-        if repo and not repo.disabled:
+        if repo and repo.full_name.split("/", 1)[0] == owner and not repo.disabled:
             live[repo.full_name] = repo
-
-    personal_owners = set(owners[1:])
-    if personal_owners:
-        for item in api_json("user/repos?per_page=100&affiliation=owner"):
-            repo = live_repo_from_api(item)
-            if repo and repo.full_name.split("/", 1)[0] in personal_owners and not repo.disabled:
-                live[repo.full_name] = repo
     return dict(sorted(live.items()))
 
 
@@ -199,7 +191,7 @@ def add_repos_entries(path: Path, missing: list[LiveRepo], allowed_topics: set[s
         lines.append(f"  homepage: {yaml_quote(repo.homepage)}")
         if repo.private:
             lines.append("  visibility: private")
-        lines.append("  topics:")
+        lines.append("  topics:" if filtered_topics else "  topics: []")
         for topic in filtered_topics:
             lines.append(f"    - {topic}")
     path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
@@ -241,16 +233,19 @@ def markdown_report(
         for value in values
     }
     tiered = {value for values in tiers.values() for value in values}
-    stale_repos = sorted(set(repos) - set(live))
-    stale_tiers = sorted(managed_tiered - set(live))
+    owned = lambda value: value.split("/", 1)[0] == UPKEEP_OWNER
+    stale_repos = sorted(value for value in set(repos) - set(live) if owned(value))
+    stale_tiers = sorted(value for value in managed_tiered - set(live) if owned(value))
     duplicate_tiers = sorted(
         value
         for value in tiered
-        if sum(value in values for values in tiers.values()) > 1
+        if owned(value) and sum(value in values for values in tiers.values()) > 1
     )
 
     lines = [
-        "# Repo Reconcile",
+        "## Summary",
+        "",
+        "Register missing hongyime catalog entries while preserving existing metadata and review history.",
         "",
         f"- Live owned repos discovered: {len(live)}",
         f"- Missing repos.yml entries: {len(missing_repos)}",
@@ -259,37 +254,49 @@ def markdown_report(
         f"- Stale tiers.yml entries: {len(stale_tiers)}",
         f"- Duplicate tier entries: {len(duplicate_tiers)}",
         "",
+        "## Changes",
+        "",
     ]
     if missing_repos:
-        lines += ["## Added repos.yml Entries", ""]
+        lines += ["### Added repos.yml Entries", ""]
         for repo in missing_repos:
             visibility = "private" if repo.private else "public"
             lines.append(f"- {repo.full_name} ({visibility})")
         lines.append("")
     if any(missing_tiers.values()):
-        lines += ["## Added tiers.yml Entries", ""]
+        lines += ["### Added tiers.yml Entries", ""]
         for tier, values in missing_tiers.items():
             for value in values:
                 lines.append(f"- {value} -> {tier}")
         lines.append("")
     if stale_repos:
-        lines += ["## Stale repos.yml Entries - Review Only", ""]
+        lines += ["### Unresolved repos.yml Entries - Review Only", ""]
         lines += [f"- {value}" for value in stale_repos]
         lines.append("")
     if stale_tiers:
-        lines += ["## Stale tiers.yml Entries - Review Only", ""]
+        lines += ["### Unresolved tiers.yml Entries - Review Only", ""]
         lines += [f"- {value}" for value in stale_tiers]
         lines.append("")
     if duplicate_tiers:
-        lines += ["## Duplicate Tier Entries - Review Only", ""]
+        lines += ["### Duplicate Tier Entries - Review Only", ""]
         lines += [f"- {value}" for value in duplicate_tiers]
         lines.append("")
     if not missing_repos and not any(missing_tiers.values()):
         lines.append("No registration changes are needed.")
+    lines += [
+        "", "## Testing", "",
+        "This report compares the accessible owned-repository inventory with the current catalogs. "
+        "Hosted checks and the proposed diff must be reviewed before merge; discovery does not prove release readiness.",
+        "Missing inventory entries are retained. Absence or a 404 does not establish deletion or authorize cleanup.",
+        "", "## Checklist", "",
+        "- [ ] No debug code or console logs left behind.",
+        "- [ ] No secrets or credentials committed.",
+        "- [ ] Documentation updated if behaviour changed.",
+    ]
     return "\n".join(lines).rstrip() + "\n"
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Reconcile live repos with sourcerepo metadata.")
     parser.add_argument("--org-owner", default=os.environ.get("GITHUB_REPOSITORY_OWNER", "hongyime"))
     parser.add_argument("--repos-yml", type=Path, default=Path("repos.yml"))
@@ -298,15 +305,17 @@ def main() -> int:
     parser.add_argument("--live-json", type=Path, help="Use a fixture instead of gh repo list.")
     parser.add_argument("--report", type=Path, help="Write a markdown reconciliation report.")
     parser.add_argument("--write", action="store_true", help="Update repos.yml and tiers.yml.")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+    if args.org_owner != UPKEEP_OWNER:
+        parser.error("Repository upkeep is restricted to hongyime")
 
     repos = parse_repos(args.repos_yml)
     tiers = parse_tiers(args.tiers_yml)
     allowed_topics = parse_topic_vocab(args.topics_yml)
-    owners = [args.org_owner] + known_metadata_owners(repos, args.org_owner)
-
     if args.live_json:
         raw_live = json.loads(args.live_json.read_text(encoding="utf-8"))
+        if not isinstance(raw_live, list) or any(not isinstance(item, dict) for item in raw_live):
+            raise ValueError("Repository fixture must contain an array of objects")
         live = {
             item["full_name"]: LiveRepo(
                 full_name=item["full_name"],
@@ -321,7 +330,11 @@ def main() -> int:
             for item in raw_live
         }
     else:
-        live = discover_live_repos(owners)
+        live = discover_live_repos(args.org_owner)
+    live = {
+        name: repo for name, repo in live.items()
+        if name.split("/", 1)[0] == UPKEEP_OWNER and not repo.disabled
+    }
 
     tiered = {value for values in tiers.values() for value in values}
     missing_repos = [

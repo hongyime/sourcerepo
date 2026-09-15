@@ -20,13 +20,34 @@ Previously ran every 3 hours across 3 workflows → hit spending limit repeatedl
 
 The sync script commits config files to every target repo with `chore(config): sync from sourcerepo [skip ci]`. The `[skip ci]` marker tells GitHub Actions to skip triggering downstream workflows (CI, CodeQL, Scorecard, etc) in each target repo. Without this, one sync run would fan out to trigger 90+ repos × N workflows = quota-exhausting.
 
+### Application file preservation
+
+Config sync updates the configured shared paths. It preserves downstream
+documentation, skills, dot directories, editor workspaces and other unlisted
+application files. Shared template directories are merged so custom forms remain.
+Linked destinations and file/directory conflicts stop that repository's update
+without publishing a partial copy.
+
+Repository enumeration must succeed before work starts. Topic lookup failures
+skip the affected repository and make the job fail; `no-config-sync` is checked
+before cloning or changing archive state. Metadata, clone, copy and push failures
+return a nonzero status. Existing weekly scheduling and downstream skip-CI commit
+messages are unchanged. Files removed by earlier syncs need a separate review of
+Git history; this change prevents repeat deletion and does not guess how to restore them.
+
+Run `python -B -m unittest discover -s tests -p test_config_sync.py -v` with
+Python 3.12, Bash, Git and jq. The tests use temporary local repositories and a
+fake GitHub CLI; they cannot push over network Git transports or change real
+repository settings. Linux CI also verifies symlink preservation.
+
 ## What gets synced
 
 Every non-disabled repo (**including archived** — see below) receives:
 
 | Item | Source path |
 |------|-------------|
-| GitHub Actions workflows | `.github/workflows/ci.yml`, `codeql.yml`, `scorecard.yml`, `trufflehog.yml`, `heartbeat.yml`, `lfs-guard.yml`, `dependabot-auto-merge.yml`, `auto-merge-bots.yml`, `dependency-review.yml`, `summary.yml`, `labeler.yml`, `greetings.yml` |
+| GitHub Actions workflows | `codeql.yml`, `scorecard.yml`, `trufflehog.yml`, `heartbeat.yml`, `lfs-guard.yml`, `dependabot-auto-merge.yml`, `auto-merge-bots.yml`, `dependency-review.yml`, `summary.yml`, `labeler.yml`, `greetings.yml` |
+| Bot merge policy | `.github/scripts/checked-bot-merge.py` |
 | Dependabot config | `.github/dependabot_config.yml` → `.github/dependabot.yml` |
 | Issue + PR templates | `.github/ISSUE_TEMPLATE/*`, `.github/pull_request_template.md` |
 | Community files | `CONTRIBUTING.md`, `SECURITY.md`, `AGENTS.md` |
@@ -94,7 +115,10 @@ Two layers stop new Git LFS bloat:
 
 ## Bot PR auto-merge
 
-Bot PRs merge automatically. Both workflows use `GH_PAT` with `--admin` to bypass branch protection:
+Bot PRs use the checked merge policy described below. Both workflows require a
+successful required application Build check and merge the verified head without
+bypassing branch protection. The portfolio rollout keeps unverified downstream
+automation disabled until each application's checks are configured.
 
 | Bot | Workflow |
 |-----|----------|
@@ -163,12 +187,93 @@ Current practical policy:
 - Do not restore the old private-except-`theprawn` rule; it does not match the
   current estate.
 
-## Cleanup performed on every target repo
+## Bot merge checks
 
-- Delete unlisted dot items at root (except exemption list: `.github/`, `.gitignore`, `.gitattributes`, `.editorconfig`, `.nvmrc`, `.node-version`, `.python-version`, `.tool-versions`, `.prettier*`, `.eslint*`, `.stylelint*`, `.babel*`, `.browserslistrc`, `.dockerignore`, `.npmrc`, `.yarnrc*`, `.pnpmfile.cjs`, `.env.example`, `.env.template`, `.env.sample`, `.sourcery.yml`, `.deepsource.toml`, `.htaccess`)
-- Delete all `*.code-workspace` files recursively
-- Remove `skills/`, `skills-lock.json`, and `docs/` from tracking
-- Inject `.gitignore` entries to prevent re-accumulation
+The shared bot workflows evaluate completed builds and status updates, or an
+explicit manual sweep. They read the policy from the trusted default branch and
+never check out PR code with the merge token. All paths require an open bot PR in
+the same repository, the default target branch, clean mergeability, a required
+successful `Build Check` / `Build` result, and no unfinished or failed checks.
+The merge request includes the exact checked head SHA. Missing checks, failed API
+lookups, draft/fork PRs and changed heads leave the PR open.
+
+Repositories without that required Build check need manual review. Before
+re-enabling automation for a Vercel project, its actual deployment check must also
+be configured as required and verified on a representative PR. A successful
+generic CI job that skips the app build is not sufficient validation. Do not
+enable the workflow until the repository's real build is mapped and tested.
+
+Application `ci.yml` is owned by each target repository and is no longer copied
+by the shared sync. The source repository's own Build Check runs the merge-policy
+regressions. Run `python -m unittest discover -s .github/tests -v` locally.
+
+The September 12 portfolio rollout suspends the confirmed unsafe legacy bot
+merge workflows while each repository's requirements are validated. Build,
+security and deployment workflows continue. Updating a workflow's file does not
+constitute verification or authorization to re-enable it automatically.
+
+## Files preserved during sync
+
+- Preserve unlisted dot items, editor workspaces, skills and documentation.
+- Merge shared template directories while preserving custom forms.
+- Maintain the marked `.gitignore` block without deleting application files.
+
+Shared settings, secrets and config sync are restricted to owned `hongyime`
+repositories; personal-account repositories and forks are excluded. Settings
+without an explicit `public` or `private` visibility retain their current
+visibility. Repository contribution rules, PR templates and reviewed Action
+references remain owned by the target repository.
+
+Workflow sync parses actual job and step `uses` fields with PyYAML 6.0.3 and
+retains the existing GitHub Action reference and inline annotation while copying
+new template logic. It matches step IDs/names and job IDs before using an
+unambiguous reference for the same Action. Action upgrades belong in explicit
+repository reviews or Dependabot PRs. New Actions use the source template.
+Malformed YAML, duplicate/merged keys, ambiguous matches and reference changes
+in anchored workflows stop that repository's copy before any push. Annotated
+references that cannot fit a flow mapping also require manual reconciliation;
+they are never silently downgraded. Local and Docker actions follow the template.
+
+Run `python -m pip install PyYAML==6.0.3`, then
+`python -m unittest discover -s tests -v` on Linux with Node, Bash, Git and jq.
+The suite uses disposable repositories and a fake GitHub CLI/API. Do not dispatch
+the live bulk settings or secret workflow to validate a code change.
+
+## Heartbeats without Vercel deployments
+
+The legacy heartbeat writes a timestamp to the default branch. Its `[skip ci]`
+message suppresses GitHub CI, but still caused Vercel production deployments.
+Root-directory Vercel apps can opt in with `.github/branch-heartbeat.json`
+containing `{"version":1,"rootDirectory":""}`. Shared sync then copies
+`.github/workflow-templates/branch-heartbeat.yml` to the app's existing heartbeat
+workflow and copies `.github/scripts/branch-heartbeat.py`. Other apps retain
+their existing heartbeat. Application CI and Vercel configuration remain owned
+by the app.
+
+The replacement schedule stays on the default branch but commits only to
+`automation/heartbeat`. The branch contains a timestamp, an ownership marker,
+and `vercel.json` with `git.deploymentEnabled:false`. It has separate history;
+normal updates preserve that history and never force-push. An existing branch
+with unexpected files, ownership or deployment settings is refused. The app's
+main `vercel.json` must also disable deployment of `automation/heartbeat` before
+the first run. Normal branches continue to deploy.
+
+Run the first heartbeat manually from main only after checking the app's Vercel
+root and production release. Verify the activity branch, unchanged main SHA,
+and absence of a Vercel deployment. No workflow is enabled or dispatched by the
+helper, so manually disabled jobs stay disabled. GitHub documents inactivity
+in terms of repository activity; this rollout still requires observation over
+the 60-day window before claiming long-term schedule continuity.
+
+For a reviewed Vercel project rooted in one plain directory, use that name in
+the opt-in, for example `{"version":1,"rootDirectory":"web"}`. Put the
+`automation/heartbeat:false` branch rule in `web/vercel.json`, the actual
+project config. The isolated activity branch contains both root and nested
+disabled-deployment configs, and its ownership marker records the directory.
+Root changes, unexpected files or directory modes abort without replacing the
+existing branch. Absolute paths, traversal, multiple levels and hidden directory
+names are rejected. Verify the actual project root and the first hosted run;
+configuration checks alone do not prove Vercel suppressed the deployment.
 
 ## License
 

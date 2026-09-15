@@ -43,18 +43,38 @@ def run(cmd: list[str], cwd: Path | None = None, timeout: int = 120) -> subproce
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GCM_INTERACTIVE"] = "Never"
+    proc = subprocess.Popen(
+        cmd,
+        cwd=str(cwd) if cwd else None,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        errors="replace",
+        env=env,
+    )
     try:
-        return subprocess.run(
-            cmd,
-            cwd=str(cwd) if cwd else None,
-            capture_output=True,
-            text=True,
-            errors="replace",
-            env=env,
-            timeout=timeout,
-        )
+        stdout, stderr = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired as exc:
-        return subprocess.CompletedProcess(cmd, 124, exc.stdout or "", f"timeout after {timeout}s")
+        # Portable Git's launcher has a child that inherits these pipes. Killing
+        # only the launcher leaves communicate() waiting for that child forever.
+        if os.name == "nt":
+            try:
+                subprocess.run(
+                    ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+        if proc.poll() is None:
+            proc.kill()
+        try:
+            stdout, _stderr = proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            stdout = exc.stdout or ""
+        if isinstance(stdout, bytes):
+            stdout = stdout.decode("utf-8", errors="replace")
+        return subprocess.CompletedProcess(cmd, 124, stdout, f"timeout after {timeout}s")
+    return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
 
 
 def gh_json(args: list[str]) -> object:
@@ -161,9 +181,17 @@ def selected(full_name: str, filters: set[str]) -> bool:
     return lowered in filters or repo in filters
 
 
+def command_failure(operation: str, proc: subprocess.CompletedProcess[str]) -> str:
+    # Report useful failure categories without printing credential-bearing URLs.
+    reason = "timed out" if proc.returncode == 124 else f"exit {proc.returncode}"
+    return f"{operation} failed ({reason})"
+
+
 def is_clean(repo_dir: Path, command_timeout: int) -> bool:
     proc = run(["git", "status", "--porcelain"], cwd=repo_dir, timeout=command_timeout)
-    return proc.returncode == 0 and not proc.stdout.strip()
+    if proc.returncode != 0:
+        raise RuntimeError(command_failure("status check", proc))
+    return not proc.stdout.strip()
 
 
 def is_empty_dir(path: Path) -> bool:
@@ -191,11 +219,13 @@ def has_tracked_changes(repo_dir: Path, command_timeout: int) -> bool:
 
 
 def current_branch(repo_dir: Path, command_timeout: int) -> str | None:
-    proc = run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo_dir, timeout=command_timeout)
-    if proc.returncode != 0:
+    proc = run(["git", "symbolic-ref", "--quiet", "--short", "HEAD"], cwd=repo_dir, timeout=command_timeout)
+    if proc.returncode == 1:
         return None
+    if proc.returncode != 0:
+        raise RuntimeError(command_failure("branch check", proc))
     branch = proc.stdout.strip()
-    return None if branch == "HEAD" else branch
+    return branch or None
 
 
 def count_revs(repo_dir: Path, revspec: str, command_timeout: int) -> int | None:
@@ -300,20 +330,29 @@ def interactive_dirty_sync(repo_dir: Path, branch: str, command_timeout: int) ->
 
 
 def sync_existing(repo_dir: Path, full_name: str, dry_run: bool, command_timeout: int, interactive: bool) -> str:
-    branch = current_branch(repo_dir, command_timeout)
+    try:
+        branch = current_branch(repo_dir, command_timeout)
+    except RuntimeError as exc:
+        return str(exc)
     if not branch:
         return "skip detached"
     if dry_run:
         return "would fetch/ff"
 
-    fetch = run(["git", "fetch", "origin"], cwd=repo_dir, timeout=180)
+    fetch = run(["git", "fetch", "--no-auto-maintenance", "origin"], cwd=repo_dir, timeout=180)
     if fetch.returncode != 0:
-        return "fetch failed"
-    remote_branch = run(["git", "rev-parse", "--verify", f"origin/{branch}"], cwd=repo_dir, timeout=command_timeout)
-    if remote_branch.returncode != 0:
+        return command_failure("fetch", fetch)
+    remote_branch = run(["git", "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}"], cwd=repo_dir, timeout=command_timeout)
+    if remote_branch.returncode == 1:
         return f"skip no origin/{branch}"
+    if remote_branch.returncode != 0:
+        return command_failure("remote branch check", remote_branch)
 
-    if not is_clean(repo_dir, command_timeout):
+    try:
+        clean = is_clean(repo_dir, command_timeout)
+    except RuntimeError as exc:
+        return str(exc)
+    if not clean:
         return interactive_dirty_sync(repo_dir, branch, command_timeout) if interactive else "skip dirty"
 
     ahead = count_revs(repo_dir, f"origin/{branch}..HEAD", command_timeout)
@@ -325,9 +364,9 @@ def sync_existing(repo_dir: Path, full_name: str, dry_run: bool, command_timeout
     if ahead > 0 and behind == 0:
         return "local ahead"
 
-    ff = run(["git", "merge", "--ff-only", f"origin/{branch}"], cwd=repo_dir, timeout=180)
-    if ff.returncode == 0:
-        return "updated"
+    if ahead == 0:
+        ff = run(["git", "-c", "maintenance.auto=false", "merge", "--ff-only", f"origin/{branch}"], cwd=repo_dir, timeout=900)
+        return "updated" if ff.returncode == 0 else command_failure("fast-forward", ff)
 
     if not interactive:
         return "skip not fast-forward"
@@ -371,7 +410,7 @@ def main() -> int:
     parser.add_argument("--workspace", type=Path, default=Path(__file__).resolve().parents[3])
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--interactive", action="store_true", help="prompt for dirty/diverged repo decisions")
-    parser.add_argument("--command-timeout", type=int, default=8, help="per-repo git command timeout in seconds")
+    parser.add_argument("--command-timeout", type=int, default=30, help="local Git check timeout in seconds (fetch/clone have separate limits)")
     parser.add_argument(
         "--only",
         action="append",
@@ -382,16 +421,18 @@ def main() -> int:
 
     workspace = normalize_path(args.workspace)
     filters = {item.strip().lower() for raw in args.only for item in raw.split(",") if item.strip()}
+    print(f"Workspace: {workspace}")
+    print("Discovering accessible GitHub repositories...")
     remotes = remote_repos()
     if filters:
         remotes = [repo for repo in remotes if selected(repo["full_name"], filters)]
-    local = local_repos(workspace, args.command_timeout)
-
-    print(f"Workspace: {workspace}")
     print(f"Remote repos in scope: {len(remotes)}")
     if filters:
         print(f"Filter: {', '.join(sorted(filters))}")
     print("No local repos are deleted by this tool.")
+    print("Scanning local repository remotes...")
+    local = local_repos(workspace, args.command_timeout)
+    print(f"Local GitHub repos found: {len(local)}")
     print("-" * 72)
 
     cloned = current = updated = review = skipped = failed = 0
@@ -419,8 +460,9 @@ def main() -> int:
             skipped += 1
         print(f"[{display.upper():18}] {full_name} -> {repo_dir}")
 
-    for repo in remotes:
+    for index, repo in enumerate(remotes, 1):
         full_name = repo["full_name"]
+        print(f"[{index}/{len(remotes)}] Checking {full_name}...")
         repo_dir = local.get(full_name)
         if repo_dir:
             result = sync_existing(repo_dir, full_name, args.dry_run, args.command_timeout, False)
@@ -448,6 +490,7 @@ def main() -> int:
             skipped += 1
             continue
         target.parent.mkdir(parents=True, exist_ok=True)
+        print(f"Cloning {full_name} (timeout: 600s)...")
         clone = run(["gh", "repo", "clone", full_name, str(target), "--", "--filter=blob:none"], timeout=600)
         if clone.returncode == 0:
             cloned += 1
@@ -481,7 +524,7 @@ def main() -> int:
         f"Current: {current} | Updated: {updated} | Cloned: {cloned} | "
         f"Review: {review} | Skipped: {skipped} | Failed: {failed}"
     )
-    return 0
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

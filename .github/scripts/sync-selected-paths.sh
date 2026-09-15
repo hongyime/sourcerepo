@@ -5,6 +5,12 @@ set -euo pipefail
 # direct manual invocation of this script hits every non-disabled repo.
 INCLUDE_ARCHIVED="${INCLUDE_ARCHIVED:-true}"
 
+# The accepted portfolio scope is the hongyime organization only.
+if [ "${GITHUB_REPOSITORY_OWNER,,}" != "hongyime" ]; then
+  echo "Config sync is restricted to hongyime" >&2
+  exit 1
+fi
+
 git config --global user.email "actions@github.com"
 git config --global user.name "GitHub Actions Sync"
 
@@ -18,31 +24,10 @@ REARCHIVE_FAILED_REPOS=()
 declare -A CASE_PATHS_BY_LOWER=()
 CASE_PATHS_READY=false
 
-# Combined repo list: hongyime org repos + personal-account owned repos.
-# Personal repos are the profile README + Pages site (kept under the personal
-# account because GitHub's magic profile/pages only render at the matching user
-# path). Any future personal-account repos are picked up automatically.
-REPOS_JSON="$( { \
-  gh api --paginate "orgs/hongyime/repos?per_page=100"; \
-  gh api --paginate "user/repos?per_page=100&affiliation=owner"; \
-  } | jq -s 'add | unique_by(.full_name) | map(select(.disabled == false and .fork == false))')"
-
-# Dot files/folders that are NEVER deleted from target repos
-EXEMPT_DOTS=(
-  ".git" ".github" ".gitignore" ".gitattributes" ".gitmodules"
-  ".agents"
-  ".editorconfig" ".nvmrc" ".node-version" ".python-version" ".tool-versions"
-  ".prettierrc" ".prettierrc.js" ".prettierrc.cjs" ".prettierrc.json"
-  ".prettierrc.yml" ".prettierrc.yaml" ".prettierignore"
-  ".eslintrc" ".eslintrc.js" ".eslintrc.cjs" ".eslintrc.json"
-  ".eslintrc.yml" ".eslintrc.yaml" ".eslintignore"
-  ".stylelintrc" ".stylelintrc.js" ".stylelintrc.json" ".stylelintrc.yml"
-  ".babelrc" ".babelrc.js" ".babelrc.cjs" ".babelrc.json"
-  ".browserslistrc" ".dockerignore"
-  ".npmrc" ".yarnrc" ".yarnrc.yml" ".pnpmfile.cjs"
-  ".env.example" ".env.template" ".env.sample"
-  ".sourcery.yml" ".deepsource.toml" ".htaccess"
-)
+# Fetch completely before any repository mutation; never enumerate personal repos.
+ORG_REPOS_JSON="$(gh api --paginate "orgs/hongyime/repos?per_page=100")"
+REPOS_JSON="$(printf '%s\n' "$ORG_REPOS_JSON" |
+  jq -s 'add | unique_by(.full_name) | map(select((.owner.login | ascii_downcase) == "hongyime" and .disabled == false and .fork == false))')"
 
 GITIGNORE_MARKER="# AI / editor dot directories (managed via sourcerepo)"
 GITIGNORE_END_MARKER="# End AI / editor dot directories (managed via sourcerepo)"
@@ -59,19 +44,71 @@ retry() {
   done
 }
 
+publish_sync_pr() {
+  local already_committed="$1"
+  local sync_branch="chore/config-sync-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+  local body_file="$SYNC_ROOT/pr-body.txt"
+  git checkout -b "$sync_branch" || return 1
+  # Required checks must run on review branches. Preserve skip-CI only for
+  # direct updates to unprotected branches, never for a pull request.
+  if [ "$already_committed" = "true" ]; then
+    git commit --amend -m "chore(config): sync from sourcerepo" || return 1
+  else
+    git commit -m "chore(config): sync from sourcerepo" || return 1
+  fi
+  git push origin "$sync_branch" || return 1
+  printf '%s\n' "$PR_BODY" > "$body_file" || return 1
+  gh pr create --repo "$FULL_NAME" --title "$PR_TITLE" --body-file "$body_file" \
+    --base "$DEFAULT_BRANCH" --head "$sync_branch" || return 1
+  echo "Opened PR for $REPO_NAME"
+}
+
+validate_copy_destination() {
+  local src="$1" dst="$2" parent="$2"
+  # A managed path must not redirect a copy through app-owned links.
+  while [ "$parent" != "." ] && [ "$parent" != "/" ]; do
+    if [ -L "$parent" ]; then
+      echo "Preserving linked destination; config copy refused: $dst" >&2
+      return 1
+    fi
+    parent="$(dirname "$parent")"
+  done
+  if [ -L "$src" ] || { [ -e "$dst" ] && {
+    { [ -f "$src" ] && [ ! -f "$dst" ]; } ||
+    { [ -d "$src" ] && [ ! -d "$dst" ]; }
+  }; }; then
+    echo "Preserving conflicting destination; config copy refused: $dst" >&2
+    return 1
+  fi
+}
+
 copy_if_exists() {
   local src="$1"
   local dst="$2"
   local dst_dir
   dst_dir="$(dirname "$dst")"
-  mkdir -p "$dst_dir"
-
   if [ -f "$src" ]; then
-    cp -f "$src" "$dst"
+    validate_copy_destination "$src" "$dst" || return 1
+    mkdir -p "$dst_dir" || return 1
+    case "$dst" in
+      .github/workflows/*.yml|.github/workflows/*.yaml)
+        python3 "$WORKDIR/.github/scripts/preserve-workflow-actions.py" "$src" "$dst" || return 1
+        ;;
+      *) cp -f "$src" "$dst" || return 1 ;;
+    esac
     echo "Copied file $src -> $dst"
   elif [ -d "$src" ]; then
-    rm -rf "$dst"
-    cp -r "$src" "$dst"
+    validate_copy_destination "$src" "$dst" || return 1
+    # Validate the complete managed tree, then merge it. Files absent from
+    # sourcerepo remain owned by the application and must survive the sync.
+    local entry
+    while IFS= read -r -d '' entry; do
+      validate_copy_destination "$entry" "$dst/${entry#"$src"/}" || return 1
+    done < <(find "$src" -mindepth 1 -print0)
+    mkdir -p "$dst" || return 1
+    while IFS= read -r -d '' entry; do
+      copy_if_exists "$entry" "$dst/${entry##*/}" || return 1
+    done < <(find "$src" -mindepth 1 -maxdepth 1 -print0)
     echo "Copied directory $src -> $dst"
   else
     echo "Source missing, skipping copy: $src"
@@ -145,24 +182,6 @@ should_skip_case_conflicting_sync() {
   esac
 }
 
-delete_unlisted_dot_items() {
-  for item in .[!.]* ; do
-    [ -e "$item" ] || continue
-    local exempt=false
-    for e in "${EXEMPT_DOTS[@]}"; do
-      [[ "$item" == "$e" ]] && exempt=true && break
-    done
-    if [ "$exempt" = false ]; then
-      rm -rf "$item"
-      echo "Deleted dot item: $item"
-    fi
-  done
-}
-
-delete_code_workspace_files() {
-  find . -path "./.git" -prune -o -name "*.code-workspace" -print -exec rm -f {} \;
-}
-
 inject_gitignore_entries() {
   if grep -qF "$GITIGNORE_MARKER" .gitignore 2>/dev/null; then
     local cleaned
@@ -182,8 +201,11 @@ inject_gitignore_entries() {
     fi
     mv "$cleaned" .gitignore
   fi
+  # Replacing the managed block must not accumulate blank lines on each run.
+  if [ -s .gitignore ] && [ -n "$(tail -n 1 .gitignore)" ]; then
+    printf '\n' >> .gitignore
+  fi
   cat >> .gitignore << 'GITIGNORE_BLOCK'
-
 # AI / editor dot directories (managed via sourcerepo)
 .*
 !.github/
@@ -250,6 +272,11 @@ while read -r repo; do
   DEFAULT_BRANCH="$(echo "$repo" | jq -r '.default_branch')"
   FULL_NAME="$REPO_OWNER/$REPO_NAME"
 
+  if [ "${REPO_OWNER,,}" != "hongyime" ] || [[ ! "$REPO_NAME" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+    echo "Skipping repository outside ownership scope: $FULL_NAME"
+    continue
+  fi
+
   # Disabled repos still cannot be interacted with (different from archived).
   if [ "$DISABLED" = "true" ] || [ "$FORKED" = "true" ]; then
     echo "Skipping repo: $REPO_NAME (disabled=$DISABLED fork=$FORKED)"
@@ -263,6 +290,30 @@ while read -r repo; do
 
   if [ "$REPO_NAME" = "$SOURCE_REPO_NAME" ]; then
     echo "Skipping source repo: $REPO_NAME"
+    continue
+  fi
+
+  # Read opt-outs before cloning or changing archive state. Unknown metadata
+  # is a failed check, never permission to replace application configuration.
+  if ! REPO_TOPICS="$(gh api "repos/$FULL_NAME/topics" --jq '.names | join(",")')"; then
+    echo "Cannot read topics for $FULL_NAME; skipping config sync" >&2
+    FAILED_REPOS+=("$REPO_NAME")
+    continue
+  fi
+  echo "Topics: ${REPO_TOPICS:-none}"
+  if [[ ",$REPO_TOPICS," == *",no-config-sync,"* ]]; then
+    echo "Skipping all config sync for $REPO_NAME (topic: no-config-sync)"
+    continue
+  fi
+
+  # Detect branch rules before cloning or changing archive state. Protected
+  # branches go straight to review instead of spending retries on a rejected
+  # direct push. An unreadable rule state must never imply an unprotected ref.
+  ENCODED_BRANCH="$(jq -rn --arg branch "$DEFAULT_BRANCH" '$branch | @uri')"
+  if ! BRANCH_PROTECTED="$(gh api "repos/$FULL_NAME/branches/$ENCODED_BRANCH" --jq '.protected')" ||
+      { [ "$BRANCH_PROTECTED" != "true" ] && [ "$BRANCH_PROTECTED" != "false" ]; }; then
+    echo "Cannot read branch protection for $FULL_NAME; skipping config sync" >&2
+    FAILED_REPOS+=("$REPO_NAME")
     continue
   fi
 
@@ -302,26 +353,6 @@ while read -r repo; do
   }
   CASE_PATHS_READY=false
 
-  # ── Per-repo opt-out via GitHub topics ────────────────────────────────
-  # Repos can opt out of specific sync items by setting topics:
-  #   • `keep-lfs`      → skip .gitattributes overwrite + skip lfs-guard.yml
-  #                       (repo legitimately needs Git LFS)
-  #   • `no-config-sync`→ skip ALL config sync for this repo (opt out entirely,
-  #                       but repo still gets settings + secrets from other jobs)
-  # Set with: gh repo edit <owner>/<repo> --add-topic keep-lfs
-  REPO_TOPICS="$(gh api "repos/$FULL_NAME/topics" --jq '.names | join(",")' 2>/dev/null || echo "")"
-  echo "Topics: ${REPO_TOPICS:-none}"
-
-  if [[ ",$REPO_TOPICS," == *",no-config-sync,"* ]]; then
-    echo "Skipping all config sync for $REPO_NAME (topic: no-config-sync)"
-    cd "$WORKDIR" || exit 1
-    rm -rf "$TARGET_DIR"
-    if [ "$UNARCHIVED_HERE" = "true" ]; then
-      rearchive_repo "$FULL_NAME" || REARCHIVE_FAILED_REPOS+=("$REPO_NAME")
-    fi
-    continue
-  fi
-
   # Filter SYNC_ITEMS if repo opted out of LFS enforcement.
   EFFECTIVE_SYNC_ITEMS="$SYNC_ITEMS"
   if [[ ",$REPO_TOPICS," == *",keep-lfs,"* ]]; then
@@ -330,15 +361,54 @@ while read -r repo; do
   fi
 
   # Copy content from sourcerepo
+  # Only opted-in apps with a validated Vercel root receive the activity heartbeat.
+  if [ -e ".github/branch-heartbeat.json" ] || [ -L ".github/branch-heartbeat.json" ]; then
+    if ! python3 "$WORKDIR/.github/scripts/branch-heartbeat.py" --validate-config .github/branch-heartbeat.json; then
+      echo "Invalid branch heartbeat opt-in for $FULL_NAME; skipping config sync" >&2
+      FAILED_REPOS+=("$REPO_NAME")
+      cd "$WORKDIR" || exit 1
+      if [ "$UNARCHIVED_HERE" = "true" ]; then
+        rearchive_repo "$FULL_NAME" || REARCHIVE_FAILED_REPOS+=("$REPO_NAME")
+      fi
+      continue
+    fi
+    EFFECTIVE_SYNC_ITEMS="${EFFECTIVE_SYNC_ITEMS/.github\/workflows\/heartbeat.yml|.github\/workflows\/heartbeat.yml/.github\/workflow-templates\/branch-heartbeat.yml|.github\/workflows\/heartbeat.yml}"
+    EFFECTIVE_SYNC_ITEMS+=$'\n.github/scripts/branch-heartbeat.py|.github/scripts/branch-heartbeat.py'
+  fi
+
+  COPY_FAILED=false
   while IFS='|' read -r src dst; do
     [ -z "$src" ] && continue
+    # Seed missing contribution contracts; an existing repo owns its rules.
+    # Keep case variants too, rather than replacing a custom local template.
+    case "${dst,,}" in
+      agents.md|contributing.md|.github/pull_request_template.md)
+        if [ -e "$dst" ] || [ -L "$dst" ] || [ -n "$(case_conflicting_paths "$dst")" ]; then
+          echo "Preserving repository contribution contract: $dst"
+          continue
+        fi
+        ;;
+    esac
     if should_skip_case_conflicting_sync "$dst"; then
       continue
     fi
     remove_case_conflicts_for "$dst"
-    copy_if_exists "$WORKDIR/$src" "$dst"
+    if ! copy_if_exists "$WORKDIR/$src" "$dst"; then
+      FAILED_REPOS+=("$REPO_NAME")
+      COPY_FAILED=true
+      break
+    fi
     force_stage_path "$dst"
   done <<< "$EFFECTIVE_SYNC_ITEMS"
+
+  if [ "$COPY_FAILED" = "true" ]; then
+    cd "$WORKDIR" || exit 1
+    rm -rf "$TARGET_DIR"
+    if [ "$UNARCHIVED_HERE" = "true" ]; then
+      rearchive_repo "$FULL_NAME" || REARCHIVE_FAILED_REPOS+=("$REPO_NAME")
+    fi
+    continue
+  fi
 
   # ── Per-repo heartbeat cron staggering (added 2026-08-04) ─────────────
   # All ~60 private repos previously shared the same Monday 09:00 UTC cron,
@@ -357,40 +427,25 @@ while read -r repo; do
     fi
   fi
 
-  delete_unlisted_dot_items
-  delete_code_workspace_files
-
-  # ── Cleanup of sourcerepo-only artifacts ──────────────────────────────
-  # We remove `skills`, `skills-lock.json`, `docs` because those live in
-  # sourcerepo but must NOT be copied into downstream repos (they're
-  # per-agent-tool caches / manifests, not app code).
-  #
-  # DO NOT add `templates` here. Some downstream repos are Flask apps
-  # whose `templates/` directory is the app's own Jinja templates
-  # (findabus.html, index.html, etc.). Sweeping them broke sgbuslaobu +
-  # validatenric production 500s until commit e69a823/f292e0b restored
-  # them from git history (2026-08-05). If skills-related templates need
-  # exclusion, they're already scoped under `skills/` above.
-  for item in skills skills-lock.json docs; do
-    [ -e "$item" ] && rm -rf "$item" && echo "Removed: $item"
-  done
+  # Unlisted application files, dot directories, skills, documentation and
+  # editor workspaces are outside this sync's ownership. Preserve them.
 
   inject_gitignore_entries
 
   git add -A
 
   if [ -n "$(git status --porcelain)" ]; then
-    git commit -m "$COMMIT_MESSAGE"
-    if retry git push origin HEAD:"$DEFAULT_BRANCH"; then
-      echo "Pushed changes to $REPO_NAME"
+    if [ "$BRANCH_PROTECTED" = "true" ]; then
+      if ! publish_sync_pr false; then
+        echo "Review branch or PR creation failed for $REPO_NAME" >&2
+        PUSH_FAILED_REPOS+=("$REPO_NAME")
+      fi
     else
-      SYNC_BRANCH="sync-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-      git checkout -b "$SYNC_BRANCH"
-      if git push origin "$SYNC_BRANCH"; then
-        gh pr create --repo "$FULL_NAME" --title "$PR_TITLE" --body "$PR_BODY" --base "$DEFAULT_BRANCH" --head "$SYNC_BRANCH" || true
-        echo "Opened PR for $REPO_NAME"
-      else
-        echo "Push failed for $REPO_NAME"
+      git commit -m "$COMMIT_MESSAGE"
+      if retry git push origin HEAD:"$DEFAULT_BRANCH"; then
+        echo "Pushed changes to $REPO_NAME"
+      elif ! publish_sync_pr true; then
+        echo "Review branch or PR creation failed for $REPO_NAME" >&2
         PUSH_FAILED_REPOS+=("$REPO_NAME")
       fi
     fi
@@ -412,13 +467,18 @@ while read -r repo; do
 done < <(echo "$REPOS_JSON" | jq -c '.[] | {name, archived, disabled, fork, default_branch, owner}')
 
 if [ "${#FAILED_REPOS[@]}" -gt 0 ]; then
-  echo "Clone/unarchive failures: ${FAILED_REPOS[*]}"
+  echo "Metadata/clone/unarchive/copy failures: ${FAILED_REPOS[*]}"
 fi
+
 if [ "${#PUSH_FAILED_REPOS[@]}" -gt 0 ]; then
   echo "Push failures: ${PUSH_FAILED_REPOS[*]}"
 fi
 if [ "${#REARCHIVE_FAILED_REPOS[@]}" -gt 0 ]; then
   echo "⚠️  RE-ARCHIVE FAILURES (manual action required): ${REARCHIVE_FAILED_REPOS[*]}"
   # Exit non-zero to surface this loudly in the Actions UI.
+  exit 1
+fi
+
+if [ "${#FAILED_REPOS[@]}" -gt 0 ] || [ "${#PUSH_FAILED_REPOS[@]}" -gt 0 ]; then
   exit 1
 fi

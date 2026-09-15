@@ -627,7 +627,17 @@ hongyime/youtubepublisher:
     - api
     - tool
 
-hongyime/scb446:
+hongyime/theprawnsplit:
+  description: ""
+  homepage: "https://theprawnsplit.vercel.app"
+  topics: []
+hongyime/theprawnskills:
   description: ""
   homepage: ""
   topics:
+    - no-config-sync
+hongyime/sgConnectSphere2026:
+  description: ""
+  homepage: "https://sgconnectsphere.vercel.app"
+  topics:
+    - no-config-sync
