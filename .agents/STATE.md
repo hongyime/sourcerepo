@@ -1,3 +1,14 @@
+# Reconciliation review preservation - 2026-09-15
+
+Branch `fix/reconciliation-review` restricts discovery to hongyime, retains
+unresolved catalog entries, emits all required PR sections and keeps empty topics
+as YAML arrays. Existing reconciliation reviews pause publication; new proposals
+use unique conventional branches, ordinary pushes and the actual default branch.
+No force-push, automatic PR closure or branch deletion remains in this workflow.
+All 12 local catalog cases pass. Seven real Bash/Git publication fixtures require
+hosted Linux validation before release. No catalog entries, target repositories,
+production apps or schedules were changed or dispatched during this repair.
+
 # Contribution convention repair - 2026-09-15
 
 Branch `fix/sync-pr-conventions`. The user requested repository-specific naming, branch and PR conventions. Config sync now prepares `chore/config-sync-*` branches and a single-line conventional title, and seeds contribution contracts only when absent. Existing AGENTS, CONTRIBUTING and PR templates, including case variants, are preserved. Reconciliation uses `chore/reconcile-repos`; new-repository requests use `chore/new-repo-request-*`. Local shell syntax, workflow parsing and all 29 shared-policy tests pass. Git Bash cannot run the disposable-repository fixtures on this Windows host because child process creation fails; all 21 fixtures now pass on hosted Linux, including both push and PR runs. Applicable security checks remain the release gate. No broad sync was dispatched.
