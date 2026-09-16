@@ -154,3 +154,17 @@ Local validation: 16 merge-policy/CI-ownership regression tests pass. Four chang
 2026-09-12 LFS checkout/capacity rotation: the current-index guard needs no history. Use depth 1 while preserving the opt-out, scan pattern and existing action references; scan errors now fail instead of becoming a false no-pointer success. Ten local fixture cases compare shallow/full clones and exercise current, historical, nested/spaced and merge-commit pointers. Seven pass on Windows; three exact Bash cases must pass on hosted Linux before release. The synthetic removed-blob fixture measures 2,099,719 bytes of full-clone objects versus 1,499 shallow bytes with equal index results. All 25 existing shared-policy tests pass. New fixture CI is source-only and is not in the downstream sync list. A source merge does not trigger broad settings sync. Next: require all 10 hosted fixtures and security checks, release the source, then a bounded three-repository pilot while preserving all local edits and workflow states. Supabase aggregate follow-up and an independent synthetic-only PostgreSQL runtime are separate capacity work; no shared Docker, collector or database mutation.
 
 2026-09-12 nested heartbeat preparation: SMU Courses uses Vercel root web, so extend the shared opt-in to one validated plain directory. Owned heartbeat trees include both root and nested disabled-deployment configs and record the root in the ownership marker. Root-app markers/history remain byte compatible. Unexpected files, modes, changed roots, traversal and concurrent ref updates fail without overwriting history. All 29 shared policy tests pass locally; hosted policy and config preservation checks must pass before source release. Rollout is bounded to Swiperboxd and SMU Courses; no broad sync or provider data workflow is dispatched.
+
+## Workspace sync upkeep — 2026-09-10
+
+Published helper repairs through 22d2798 using an isolated checkout. Eleven regression checks pass. Root launcher now uses 30-second local checks; Windows timeouts stop child processes, and large fast-forwards have 15 minutes. Automatic repacking is deferred for bulk fetch/merge commands. The existing local clone-layout edit was preserved and excluded from publication. All 81 remote repositories received synchronization checks; see the workspace maintenance plan and coverage report for individual outcomes.
+
+## Wave-3 baseline audit — 2026-09-16
+
+Read-only baseline review by opencode/Sisyphus-Junior. No sync configs or workflows were modified.
+- Branch: main, up to date with origin.
+- 0 open PRs; 1 open issue #44 (SHELL compliance drift, shell-compliance label, 2026-09-14).
+- Secret scan (tools/*.py): 8 matches — all comments/docstrings about scanning, no real credentials.
+- Pre-existing uncommitted changes preserved: .agents/STATE.md and .agents/JOURNAL.md (workspace upkeep notes from prior session) and tools/workspace/sync_workspace.py (untouched).
+- Repo purpose confirmed: source-of-truth for all owned repos' shared configs; syncs AGENTS.md, Dependabot, labels, GitHub settings to target repos via workflow; repos.yml is the canonical catalog; tiers.yml classifies external repos.
+- Next: pending open tasks from 2026-09-15 STATE (hosted Linux fixtures, required-check rollout, heartbeat pilot verification) carry over unchanged.
