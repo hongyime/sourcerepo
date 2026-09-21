@@ -19,6 +19,7 @@ import os
 import re
 import subprocess
 import sys
+import urllib.request
 from pathlib import Path
 
 
@@ -43,6 +44,12 @@ def run(cmd: list[str], cwd: Path | None = None, timeout: int = 120) -> subproce
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GCM_INTERACTIVE"] = "Never"
+    # LFS smudge/pull filters spawn a child that can hang indefinitely waiting on
+    # the network; taskkill /T does not reliably reach it on Windows. Skipping
+    # smudge/pull is safe here because this script only checks sync status and
+    # fast-forwards refs -- it never needs actual LFS blob content.
+    env["GIT_LFS_SKIP_SMUDGE"] = "1"
+    env["GIT_LFS_SKIP_PULL"] = "1"
     proc = subprocess.Popen(
         cmd,
         cwd=str(cwd) if cwd else None,
@@ -77,11 +84,29 @@ def run(cmd: list[str], cwd: Path | None = None, timeout: int = 120) -> subproce
     return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
 
 
-def gh_json(args: list[str]) -> object:
-    proc = run(["gh", *args], timeout=180)
-    if proc.returncode != 0:
-        raise RuntimeError(proc.stderr.strip() or proc.stdout.strip())
-    return json.loads(proc.stdout or "null")
+def github_token() -> str:
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if not token:
+        raise RuntimeError(
+            "GITHUB_TOKEN (or GH_TOKEN) environment variable is required. gh CLI "
+            "is no longer used for API/clone calls because it hangs unpredictably "
+            "on this workspace -- set the same token gh itself would use."
+        )
+    return token
+
+
+def github_api(path: str) -> object:
+    url = f"https://api.github.com/{path.lstrip('/')}"
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Authorization": f"Bearer {github_token()}",
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "sync_workspace.py",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return json.loads(resp.read().decode("utf-8") or "null")
 
 
 def normalize_path(path: Path) -> Path:
@@ -95,25 +120,24 @@ def authenticated_user() -> str:
     global _AUTHENTICATED_USER
     if _AUTHENTICATED_USER:
         return _AUTHENTICATED_USER
-    data = gh_json(["api", "user"])
+    data = github_api("user")
     _AUTHENTICATED_USER = str(data["login"])
     return _AUTHENTICATED_USER
 
 
 def paginated(endpoint: str) -> list[dict]:
-    proc = run(["gh", "api", "--paginate", endpoint], timeout=300)
-    if proc.returncode != 0:
-        raise RuntimeError(proc.stderr.strip() or proc.stdout.strip())
     items: list[dict] = []
-    for line in proc.stdout.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        payload = json.loads(line)
-        if isinstance(payload, list):
-            items.extend(payload)
-        else:
-            items.append(payload)
+    separator = "&" if "?" in endpoint else "?"
+    page = 1
+    while True:
+        payload = github_api(f"{endpoint}{separator}page={page}")
+        batch = payload if isinstance(payload, list) else [payload]
+        if not batch:
+            break
+        items.extend(batch)
+        if len(batch) < 100:
+            break
+        page += 1
     return items
 
 
@@ -491,7 +515,12 @@ def main() -> int:
             continue
         target.parent.mkdir(parents=True, exist_ok=True)
         print(f"Cloning {full_name} (timeout: 600s)...")
-        clone = run(["gh", "repo", "clone", full_name, str(target), "--", "--filter=blob:none"], timeout=600)
+        clone_url = f"https://github.com/{full_name}.git"
+        auth_header = f"http.extraHeader=Authorization: Bearer {github_token()}"
+        clone = run(
+            ["git", "-c", auth_header, "clone", "--filter=blob:none", clone_url, str(target)],
+            timeout=600,
+        )
         if clone.returncode == 0:
             cloned += 1
             print(f"[CLONED            ] {full_name} -> {target}")
