@@ -13,6 +13,15 @@
 
 - 2026-09-10: Fixed workspace sync progress, failure classification and Windows child-process timeouts; use 30-second local-check defaults. Keep safe mode limited to clean fast-forwards and preserve unrelated local clone-layout work.
 
+- 2026-09-23: Fixed two hangs in sync_workspace.py: (1) Git LFS smudge/pull filters
+  hang past the taskkill /T /F timeout on collaborator LFS repos -> set
+  GIT_LFS_SKIP_SMUDGE/GIT_LFS_SKIP_PULL for every git subprocess. (2) gh CLI
+  itself hangs unpredictably on this workspace, even on `gh --version` with no
+  network/auth involved -> replaced gh api/gh repo clone with direct GitHub
+  REST calls + git clone using an http.extraHeader auth token (same
+  GITHUB_TOKEN gh already used). Verified against the exact repos that
+  previously stalled for 3x30min runs; now complete in <1s each. Full 82-repo
+  sync now completes end to end without gh as a dependency.
 - 2026-09-10: Prioritized config-sync preservation after source review found deletion of app-owned files and opt-outs bypassed on metadata errors. Validate with temporary repositories before publishing; retain the weekly schedule and skip-CI downstream commits.
 
 - 2026-09-10: Linux CI run 34453272672 passed all eleven config-sync fixture checks, including file preservation, failed metadata, opt-outs, copy conflicts and archive restoration. Local Windows/WSL attempts were environment failures; no live organization sync was run.
