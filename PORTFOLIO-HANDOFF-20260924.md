@@ -134,12 +134,26 @@ on `main` via `gh api`, not just locally):
    quota limit, and the PR author (bryanseah234, same identity as this
    session's `gh` auth) cannot self-approve. **Needs a human (or a different
    account's) approval to merge.**
-3. **Unpinned GitHub Actions, portfolio-wide** — hardening-sweep sample of
-   12 repos found widespread use of tag refs instead of pinned SHAs:
-   `theprawnsplit` (~40+ unpinned across 16 workflows), `ticketremaster-f`
-   (~35+), plus others. TODO: decide if/when to run a dedicated remediation
-   wave (mirroring the SHA-pinning fix already done for `gmaplists`' CodeQL
-   workflow and the original Wave 1 CI fixes).
+3. **Unpinned GitHub Actions, portfolio-wide** — done. Fixed across 11 repos:
+   `theprawnsplit` (34 refs/18 workflows), `ticketremaster-f` (30/15),
+   `ticketremaster-b` (34/16), `dejavista` (34/17), `sgBusLaoBu2021` (40/20 —
+   on `master`, its real default branch — see stray-branch note below),
+   `ctfsolver` (30/14), `sgCampusCore2026` (30/15), `sgCertWatch2026` (54/24),
+   `theprawnhunter` (18/8), `FORGE` (69/17). ~373 refs total, plus `gmaplists`
+   done earlier (5 refs, its CodeQL workflow). Resolved each `action@tag` to
+   its commit SHA via the GitHub API and rewrote in place with a trailing
+   `# original-ref` comment. No functional changes; CI reverified green
+   (success/cancelled only, zero failures) on every repo after the change.
+   **Found while fixing this**: `sgBusLaoBu2021`'s real default branch is
+   `master`, not `main` — it also has a separate, unused `main` branch that
+   pre-existed this session (not created by it). My first pass wrote fixes
+   into that stray `main` by mistake (script assumed `main` everywhere);
+   caught it via a 409 sha-mismatch error, redid it correctly against
+   `master`, verified clean. The stray `main` branch itself was left alone —
+   it now has orphaned SHA-pinning commits nobody will ever use since it's
+   not default. Harmless, but flagging in case the user wants it deleted or
+   wants this repo migrated to `main` like the rest of the portfolio (Wave 5
+   precedent).
 4. **Supabase PAT rotation** — a live personal access token
    (`sbp_cb26...` — see chat history for the full value, not repeating it
    here) was pasted into chat during Wave 2 and used directly (never passed
@@ -154,15 +168,18 @@ on `main` via `gh api`, not just locally):
   merged (squash + delete branch). Confirmed `merged: true` via API.
 - **`sgConnectSphere2026` PR #122** — see item 2 above; automated checks all
   green now, only the human-review gate remains.
+- **Unpinned GitHub Actions** — see item 3 above; all 11 sampled/known repos
+  fixed, ~373 refs pinned to SHA.
 
 ## How to resume
 
 1. Re-verify each "done" item above with a live `gh` call before assuming it's
    still true (another machine/agent may have touched these repos since).
-2. Work through the 4 outstanding items above ��� all need either credentials
-   the previous session didn't have (Cloudflare/`wrangler`), a human decision
-   (run the unpinned-actions wave?), or are explicitly deprioritized by the
-   user (PAT rotation).
+2. Only 3 items truly remain: `theprawnhunter` (needs Cloudflare/`wrangler`
+   credentials this session doesn't have), the `sgConnectSphere2026` PR #122
+   review click (needs a human, or a different account than the PR author),
+   and the PAT rotation (explicitly deprioritized by the user, not a
+   blocker).
 3. Everything else in the original 8-wave cross-pollination plan is complete.
    If picking up fresh context on "what was the plan," the original audit
    that drove it is at
