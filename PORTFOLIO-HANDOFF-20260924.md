@@ -97,8 +97,13 @@ on `main` via `gh api`, not just locally):
     category, llmTriage, sla) + fixed a missing `.first()` method in the
     shared `config/testing/convex-fixture.mjs` mock. Verified via throwaway
     PR #61 (closed, not merged) that the real CI Build job is green.
-  - `gmaplists` — **not done**, system-cancelled via stale-timeout mid-task.
-    See action items below.
+  - `gmaplists` — done: finished directly after the delegated subagent stalled
+    twice with zero progress (31min of reads + hung SMB git calls, no writes).
+    Added 25 new tests (autoTagMeasurement/browserStorage/mapLinkService/
+    privacy, 54 total with the 29 pre-existing ones). One test scenario was
+    initially wrong (missed that `classifyPlaceByRules` gives note text
+    priority over name/label matches) — caught by a real CI failure, fixed,
+    reverified green. Commit `6cabdea`. `.agents/STATE.md`/`JOURNAL.md` updated.
 
 ## Outstanding action items (what still needs doing, per repo)
 
@@ -117,34 +122,30 @@ on `main` via `gh api`, not just locally):
    `repository-checks`) that don't correspond to any workflow file in the
    repo (likely a GitHub App / branch-protection-injected check).
    TODO: investigate what app/setting owns these checks, or ask the user.
-3. **`gmaplists`** — test-writing task was cancelled by the system's
-   stale-timeout guard mid-run (no replacement was auto-spawned, per its own
-   instruction). Diagnosed as likely a one-off session glitch, not a real
-   scoping problem. TODO: decide whether to retry (get explicit go-ahead
-   before relaunching — this was flagged to the user and not yet answered
-   as of this handoff).
-4. **Unpinned GitHub Actions, portfolio-wide** — hardening-sweep sample of
+3. **Unpinned GitHub Actions, portfolio-wide** — hardening-sweep sample of
    12 repos found widespread use of tag refs instead of pinned SHAs:
    `theprawnsplit` (~40+ unpinned across 16 workflows), `ticketremaster-f`
    (~35+), plus others. TODO: decide if/when to run a dedicated remediation
    wave (mirroring the SHA-pinning fix already done for `gmaplists`' CodeQL
    workflow and the original Wave 1 CI fixes).
-5. **Supabase PAT rotation** — a live personal access token
+4. **Supabase PAT rotation** — a live personal access token
    (`sbp_cb26...` — see chat history for the full value, not repeating it
    here) was pasted into chat during Wave 2 and used directly (never passed
    into any subagent prompt) to provision Supabase tables/secrets for
-   `sgBusLaoBu2021` and `sgConnectSphere2026`. **The user should rotate/revoke
-   this token** — not confirmed done as of this handoff.
-6. **`smucourses` PR #31** (`.vercelignore` addition, branch protected) —
+   `sgBusLaoBu2021` and `sgConnectSphere2026`. The user was told to rotate/
+   revoke it and **explicitly said not to prioritize this** ("dont care about
+   the pat rotate rn") — left open at the user's discretion, not a blocker.
+5. **`smucourses` PR #31** (`.vercelignore` addition, branch protected) —
    opened, merge status not reconfirmed since. TODO: check and merge if green.
 
 ## How to resume
 
 1. Re-verify each "done" item above with a live `gh` call before assuming it's
    still true (another machine/agent may have touched these repos since).
-2. Work through the 6 outstanding items above — most need either credentials
-   the previous session didn't have (Cloudflare/`wrangler`) or a human
-   decision (retry gmaplists? run the unpinned-actions wave? rotate the PAT?).
+2. Work through the 4 outstanding items above — all need either credentials
+   the previous session didn't have (Cloudflare/`wrangler`), a human decision
+   (run the unpinned-actions wave?), or are explicitly deprioritized by the
+   user (PAT rotation).
 3. Everything else in the original 8-wave cross-pollination plan is complete.
    If picking up fresh context on "what was the plan," the original audit
    that drove it is at
