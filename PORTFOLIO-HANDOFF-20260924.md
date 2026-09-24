@@ -144,16 +144,22 @@ on `main` via `gh api`, not just locally):
    its commit SHA via the GitHub API and rewrote in place with a trailing
    `# original-ref` comment. No functional changes; CI reverified green
    (success/cancelled only, zero failures) on every repo after the change.
-   **Found while fixing this**: `sgBusLaoBu2021`'s real default branch is
-   `master`, not `main` — it also has a separate, unused `main` branch that
-   pre-existed this session (not created by it). My first pass wrote fixes
-   into that stray `main` by mistake (script assumed `main` everywhere);
-   caught it via a 409 sha-mismatch error, redid it correctly against
-   `master`, verified clean. The stray `main` branch itself was left alone —
-   it now has orphaned SHA-pinning commits nobody will ever use since it's
-   not default. Harmless, but flagging in case the user wants it deleted or
-   wants this repo migrated to `main` like the rest of the portfolio (Wave 5
-   precedent).
+   **IMPORTANT correction, found on closer inspection**: `sgBusLaoBu2021`'s
+   real default branch is `master`, not `main`. It also has a second,
+   separate `main` branch that pre-existed this session (not created by it).
+   My first pass wrote SHA-pinning fixes into that `main` by mistake (script
+   assumed `main` everywhere); caught it via a 409 sha-mismatch error, redid
+   it correctly against `master`, verified clean there.
+   **This `main` branch is NOT a harmless empty leftover** — initial
+   assumption was wrong. It shares **no common git ancestor** with `master`,
+   has **100+ independent commits**, and its own `main.py` differs
+   substantially in size from `master`'s (7350 vs 3689 bytes) — this is a
+   real, actively-diverged parallel version of the codebase, not a stub or
+   duplicate. **Do not delete, merge, or otherwise touch this branch without
+   the user's explicit decision on what it represents and whether it's still
+   wanted.** My only change to it was the accidental SHA-pinning commits
+   from the mis-targeted first pass — nothing else was touched, and nothing
+   was deleted.
 4. **Supabase PAT rotation** — a live personal access token
    (`sbp_cb26...` — see chat history for the full value, not repeating it
    here) was pasted into chat during Wave 2 and used directly (never passed
