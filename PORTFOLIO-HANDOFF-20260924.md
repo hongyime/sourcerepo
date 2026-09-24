@@ -118,10 +118,22 @@ on `main` via `gh api`, not just locally):
    `src/index.ts` PROJECTS array and run
    `wrangler secret put SUPABASE_ANON_THEPRAWNHUNTER` against the
    `supabasealive` Worker.
-2. **`sgConnectSphere2026` PR #122** — 2 failing checks (`pr-conventions`,
-   `repository-checks`) that don't correspond to any workflow file in the
-   repo (likely a GitHub App / branch-protection-injected check).
-   TODO: investigate what app/setting owns these checks, or ask the user.
+2. **`sgConnectSphere2026` PR #122** — root-caused and unblocked on the
+   automated side. The 4 required checks (`repository-checks`,
+   `pr-conventions`, `lfs-guard`, `application-checks`) run via GitHub App
+   15368 (GitHub Actions) but were stuck `action_required` — approved and ran
+   them (`gh api .../actions/runs/{id}/approve`). `repository-checks` then
+   failed on a real issue (missing trailing newline in
+   `supabase-keepalive.yml`, caught by the `end-of-file-fixer` pre-commit
+   hook) — fixed. `pr-conventions` failed because the PR body didn't match
+   `.github/pull_request_template.md`'s required sections — rewrote the body
+   with real evidence per section. All 4 checks are now green. **The ONLY
+   remaining blocker is the required approving review**
+   (`required_approving_review_count: 1`, `require_last_push_approval: true`)
+   — the only "review" on record is Copilot's auto-reviewer bailing out on a
+   quota limit, and the PR author (bryanseah234, same identity as this
+   session's `gh` auth) cannot self-approve. **Needs a human (or a different
+   account's) approval to merge.**
 3. **Unpinned GitHub Actions, portfolio-wide** — hardening-sweep sample of
    12 repos found widespread use of tag refs instead of pinned SHAs:
    `theprawnsplit` (~40+ unpinned across 16 workflows), `ticketremaster-f`
@@ -135,14 +147,19 @@ on `main` via `gh api`, not just locally):
    `sgBusLaoBu2021` and `sgConnectSphere2026`. The user was told to rotate/
    revoke it and **explicitly said not to prioritize this** ("dont care about
    the pat rotate rn") — left open at the user's discretion, not a blocker.
-5. **`smucourses` PR #31** (`.vercelignore` addition, branch protected) —
-   opened, merge status not reconfirmed since. TODO: check and merge if green.
+
+## Resolved this session (2026-09-24, second pass)
+
+- **`smucourses` PR #31** — updated branch (was behind main), waited for CI,
+  merged (squash + delete branch). Confirmed `merged: true` via API.
+- **`sgConnectSphere2026` PR #122** — see item 2 above; automated checks all
+  green now, only the human-review gate remains.
 
 ## How to resume
 
 1. Re-verify each "done" item above with a live `gh` call before assuming it's
    still true (another machine/agent may have touched these repos since).
-2. Work through the 4 outstanding items above — all need either credentials
+2. Work through the 4 outstanding items above ��� all need either credentials
    the previous session didn't have (Cloudflare/`wrangler`), a human decision
    (run the unpinned-actions wave?), or are explicitly deprioritized by the
    user (PAT rotation).
