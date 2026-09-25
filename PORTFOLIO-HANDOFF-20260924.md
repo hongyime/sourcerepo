@@ -177,15 +177,105 @@ on `main` via `gh api`, not just locally):
 - **Unpinned GitHub Actions** — see item 3 above; all 11 sampled/known repos
   fixed, ~373 refs pinned to SHA.
 
+## Resolved this session (2026-09-25, team-mode re-audit sweep)
+
+Ran a fresh portfolio-wide re-audit across all 69 non-archived `hongyime/*`
+repos (team_mode's `team_create` hit its usual lock-timeout/creation-state
+issues again - 2 of 4 audit members never actually started, real work got
+silently swapped to zombie sessions; the lead did those 2 batches directly
+instead of fighting it further; team closed via force-delete since its status
+never left `creating` despite real member work completing). Findings and
+fixes from this pass:
+
+- **Merged 7 more clean/fixed PRs**: `sgCarParks2020` #114/#115/#116,
+  `searchIG2020` #86, `gmaplists` #145, `theprawnsplit` #13,
+  `anywheelsQR2020` #48 (after a real fix - see below).
+- **`pythoncrash`**: found and fixed the exact same labeler-config-path bug
+  as an earlier wave, but in a different file - a stale, redundant
+  `.github/workflows/label.yml` (old GitHub template default, pointed at a
+  nonexistent `.github/labeler.yml`, never skipped dependabot) was still
+  present alongside the already-correct `labeler.yml`. Deleted the stale
+  file, updated the 3 blocked dependabot PRs' branches, merged all 3.
+- **`anywheelsQR2020` PR #48**: root-caused a `tests/test_merge_policy.py`
+  failure (`AttributeError: module 'merge_policy' has no attribute 'shutil'`
+  and `'CHECK_FIELDS'`) to the PR branch carrying a genuinely older blob of
+  `.github/scripts/checked-bot-merge.py` than current `main` - `update-branch`
+  didn't reconcile it because the PR's own diff never touched that file.
+  Overwrote it directly with main's current (already-correct) version on the
+  PR branch, merged.
+- **CodeQL "default setup + advanced configuration" conflict** (error:
+  "CodeQL analyses from advanced configurations cannot be processed when the
+  default setup is enabled") fixed on 4 repos by disabling default setup via
+  `PATCH /repos/{repo}/code-scanning/default-setup {state: not-configured}`:
+  `unifiedanalyzer`, `facetracker`, `smuseats`, `pocketclawd`. Each already
+  had a working custom `codeql.yml` (the "advanced" config) - default setup
+  was the redundant, conflicting half. Could not force a fresh verification
+  run (`codeql.yml` has no `workflow_dispatch` on any of the 4) but the fix
+  is a Settings-level change and will apply on the next real push/PR/schedule
+  trigger.
+- **`sgSHIOK2026`**: `.vercelignore` was missing 2 required negation lines
+  for `web/public/data/generated_20260805_prefer_scored_routed/` (a
+  repo-integrity check enforces this exact pair exists). Added both lines,
+  pushed to main.
+- **`theprawnprojects`**: root-caused 11 consecutive "Catalog Refresh"
+  failures (`FATAL ERROR: JavaScript heap out of memory`, exit 134) to a
+  real bug in `scripts/auto-update-catalog.mjs`'s Vercel-API pagination
+  loop - it checked `from !== undefined` but Vercel returns `pagination.next
+: null` (not `undefined`) on the last page, so the loop never terminated and
+  kept re-requesting with a literal `from=null` string forever. Fixed the
+  loop condition to `!= null`, added a defensive max-page cap and a
+  stuck-cursor guard as belt-and-suspenders. Verified via two manual
+  `workflow_dispatch` runs: first confirmed the new guard fires fast and
+  clean instead of OOMing (proving the diagnosis), second confirmed a full
+  successful run after the real fix.
+- **`sgCertWatch2026`**: found a NEW, separate failure in
+  `scripts/test_intel_ui.mjs` (Playwright E2E) - after a reload +
+  visibility-change refresh, the "Domains to watch now" view's watch-cards
+  (`#finding-list [data-finding-index] .watch-card-head strong`) return an
+  empty list instead of the 3 expected registrable domains. Confirmed
+  `renderFindingCard` in `lib/ui/findings-list.js` itself looks structurally
+  correct (right class names, right escaping) - the bug is upstream in
+  whatever decides how many findings get passed to it after that specific
+  refresh sequence, which needs actual Playwright-level debugging (stepping
+  through the real browser state), not static code reading. **Not fixed -
+  needs a dedicated debugging session.** Also worth noting: this repo's
+  history shows an earlier commit in this same relative area (`5dbf7483`,
+  this session's own XSS sanitization fix) had an unrelated side effect
+  that deleted a desktop table render branch, which was already caught and
+  fixed by a later commit (`e45240a`) before this session even started - not
+  something to redo, just context.
+- **`sgConnectSphere2026`**: has 8 open PRs, all 0-1 days old - looks like
+  genuinely active, in-progress development, not stale/stuck. Left alone.
+- **`FORGE`**: has 4 dependabot PRs (version bumps only) and 13 simultaneous
+  CI failures across highly specialized-sounding jobs (Kill-Chain Integration,
+  OPSEC Evasion Assertions, Phase 0-6 pentest modules, etc.) that are already
+  failing on `main` itself, not caused by the PRs. This looks like a complex
+  custom security-tooling test suite that may need real secrets/sandbox
+  environment setup in CI, or may have a genuine multi-job regression -
+  either way it's too specialized and high-risk to touch during a broad audit
+  sweep. **Flagged for a dedicated investigation, not touched.**
+- **Still not investigated this pass** (found, not yet triaged):
+  `englishDefinitions2021` (CI FAILURE: build (3.10)), `nusnetID2021` (CI
+  FAILURE: build, build (3.10), deploy), `theprawntemplate` (CI FAILURE:
+  deploy), `nanyangNightStudy2020` (CI FAILURE: Dependabot check),
+  `pocketclawd` (2 more failures beyond the CodeQL one already fixed: Test
+  (coverage gate), Lint).
+
 ## How to resume
 
 1. Re-verify each "done" item above with a live `gh` call before assuming it's
    still true (another machine/agent may have touched these repos since).
-2. Only 3 items truly remain: `theprawnhunter` (needs Cloudflare/`wrangler`
+2. Real remaining items: `theprawnhunter` (needs Cloudflare/`wrangler`
    credentials this session doesn't have), the `sgConnectSphere2026` PR #122
    review click (needs a human, or a different account than the PR author),
-   and the PAT rotation (explicitly deprioritized by the user, not a
-   blocker).
+   the PAT rotation (explicitly deprioritized by the user, not a blocker),
+   `FORGE`'s 13 specialized CI failures (needs a dedicated investigation),
+   `sgCertWatch2026`'s watch-card rendering bug in the "Domains to watch
+   now" view (needs real Playwright/browser-level debugging, not static
+   reading), and 5 untriaged CI failures: `englishDefinitions2021`,
+   `nusnetID2021`, `theprawntemplate`, `nanyangNightStudy2020`,
+   `pocketclawd` (coverage gate + lint, separate from its already-fixed
+   CodeQL issue).
 3. Everything else in the original 8-wave cross-pollination plan is complete.
    If picking up fresh context on "what was the plan," the original audit
    that drove it is at
