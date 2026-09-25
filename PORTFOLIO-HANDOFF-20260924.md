@@ -254,28 +254,94 @@ fixes from this pass:
   environment setup in CI, or may have a genuine multi-job regression -
   either way it's too specialized and high-risk to touch during a broad audit
   sweep. **Flagged for a dedicated investigation, not touched.**
-- **Still not investigated this pass** (found, not yet triaged):
-  `englishDefinitions2021` (CI FAILURE: build (3.10)), `nusnetID2021` (CI
-  FAILURE: build, build (3.10), deploy), `theprawntemplate` (CI FAILURE:
-  deploy), `nanyangNightStudy2020` (CI FAILURE: Dependabot check),
-  `pocketclawd` (2 more failures beyond the CodeQL one already fixed: Test
-  (coverage gate), Lint).
+## Resolved this session (2026-09-25, second re-audit pass - after skeptical
+re-examination pushed back on premature deferrals)
+
+- **`FORGE`**: was previously flagged as "too complex, 13 specialized
+  failures, don't touch." On closer inspection, all 13 failing jobs were
+  part of the SAME single workflow run - checked for a shared cause instead
+  of assuming each needed separate investigation. Found it: the mock-SMB
+  service container `dperson/samba:latest` returns "manifest unknown" (a
+  broken/corrupted multi-arch manifest on Docker Hub - the tag is listed but
+  won't resolve), and this one shared service definition is used by many of
+  the pentest-phase jobs, cascading one broken image into 13 apparently
+  unrelated failures. Fixed by pinning to the explicit `:amd64` tag instead
+  (GitHub-hosted runners are amd64; the arch-specific tag resolves fine).
+  Verified via a full fresh CI run: **success**. Lesson: don't assume
+  "many failures = many root causes" without checking run IDs first.
+- **`englishDefinitions2021` + `nusnetID2021`**: both had `pylint
+  $(git ls-files '*.py')` failing on style nitpicks in the shared
+  `.github/scripts/checked-bot-merge.py` tooling script (line-too-long,
+  missing-function-docstring, invalid module name due to the hyphenated
+  filename). First fix attempt used `pylint --ignore-paths='^\.github/
+  scripts/'` - **this does not work**, because `--ignore-paths` only filters
+  pylint's own directory-walk discovery, not an explicit file list passed as
+  arguments (a real, non-obvious pylint gotcha). Caught it by re-verifying
+  instead of trusting the first push, fixed properly by filtering the file
+  list itself before pylint ever sees it: `$(git ls-files '*.py' | grep -v
+  '^\.github/scripts/')`. Both verified green.
+- **`theprawntemplate`**: `cloudflare/pages-action` is not just an outdated
+  tag - the whole action repo returns 404, fully deleted by Cloudflare in
+  favor of `cloudflare/wrangler-action`. Replaced it (`wrangler-action@v4`,
+  `command: pages deploy dist --project-name=...`), then hit a second, real
+  issue: the fixed action correctly resolved but then failed because this
+  template repo has no `CLOUDFLARE_API_TOKEN` configured (by design - it's
+  a template, never customized). Added `if: vars.CLOUDFLARE_DEPLOY_ENABLED
+  == 'true'` so the step skips cleanly instead of permanently failing every
+  push. Verified success.
+- **`nusnetID2021`** (bonus find while fixing pylint): also had 2 dead,
+  mutually-conflicting GitHub Pages deployment workflows
+  (`jekyll-gh-pages.yml` + `static.yml`, both auto-enabled default
+  templates, same `concurrency: group: pages`, both trigger on every push).
+  This repo is a Python ID-generator tool (`generate.py`) with zero HTML/
+  Jekyll content anywhere in the tree - neither workflow had anything real
+  to deploy. Deleted both. Checked 6 sibling ID/data-tool repos
+  (`sgNRIC2003`, `validateNRIC2020`, `sgPhoneNumbers65`, `sgNumbers2020`,
+  `sgNRICgenerator65`, `websiteDOS2019`) for the same pattern - none have it,
+  so this was repo-specific, not systemic.
+- **`nanyangNightStudy2020`**: the flagged "Dependabot"/`submit-maven`
+  failure is from **2026-08-07** - checked, and the `pom.xml` that would
+  have triggered GitHub's automatic Maven dependency-submission has already
+  been removed from the repo since then (404 on current `main`). This is a
+  stale historical check-run attached to the current HEAD by GitHub's UI,
+  not a live, re-triggerable failure. Nothing to fix - already resolved by
+  whatever change removed `pom.xml`.
+
+**Genuinely deferred, not just "too hard to look at":**
+
+- **`pocketclawd` Lint**: actually read the full failure log this time -
+  200+ real `@typescript-eslint/no-unused-vars` violations across dozens of
+  files in `src/` (real application code - a multi-channel bot/bridge tool -
+  not shared tooling like the pylint cases above). Mechanically fixable
+  (rename unused args to `_name` per the project's own lint policy, remove
+  genuinely dead imports) but the volume and the fact that it's production
+  code make an unverified mass-edit irresponsible without running the local
+  test suite - which needs a dedicated session with the repo actually
+  checked out and its test/build tooling working, not more `gh api` log
+  archaeology. `Test (coverage gate)` in the same repo is likely similarly
+  out of scope for a sweep (coverage gaps need real new tests, not a CI-
+  config fix).
+- **`sgCertWatch2026`** watch-card bug: read `renderFindingCard` in
+  `lib/ui/findings-list.js` end to end - the markup/class names/escaping are
+  all correct. The bug is upstream: something about the reload +
+  visibility-change refresh sequence in `test_intel_ui.mjs` ends up passing
+  zero findings to the renderer for the "Domains to watch now" view. This
+  needs real Playwright/browser-level stepping-through, not more static code
+  reading - genuinely different tooling than everything else fixed this
+  session, not a stalling excuse.
 
 ## How to resume
 
 1. Re-verify each "done" item above with a live `gh` call before assuming it's
    still true (another machine/agent may have touched these repos since).
-2. Real remaining items: `theprawnhunter` (needs Cloudflare/`wrangler`
-   credentials this session doesn't have), the `sgConnectSphere2026` PR #122
-   review click (needs a human, or a different account than the PR author),
-   the PAT rotation (explicitly deprioritized by the user, not a blocker),
-   `FORGE`'s 13 specialized CI failures (needs a dedicated investigation),
-   `sgCertWatch2026`'s watch-card rendering bug in the "Domains to watch
-   now" view (needs real Playwright/browser-level debugging, not static
-   reading), and 5 untriaged CI failures: `englishDefinitions2021`,
-   `nusnetID2021`, `theprawntemplate`, `nanyangNightStudy2020`,
-   `pocketclawd` (coverage gate + lint, separate from its already-fixed
-   CodeQL issue).
+2. Real remaining items, down to just 4: `theprawnhunter` (needs Cloudflare/
+   `wrangler` credentials this session doesn't have), the
+   `sgConnectSphere2026` PR #122 review click (needs a human, or a different
+   account than the PR author), the PAT rotation (explicitly deprioritized
+   by the user, not a blocker), `pocketclawd`'s Lint (200+ real unused-var
+   violations, needs a dedicated session with local test verification) and
+   Test coverage gate, and `sgCertWatch2026`'s watch-card rendering bug
+   (needs real Playwright/browser-level debugging).
 3. Everything else in the original 8-wave cross-pollination plan is complete.
    If picking up fresh context on "what was the plan," the original audit
    that drove it is at
