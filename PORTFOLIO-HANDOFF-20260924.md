@@ -337,70 +337,75 @@ re-examination pushed back on premature deferrals)
   constraint). `Test (coverage gate)` is a genuinely separate, deferred
   item - it needs real new tests written to raise coverage, not a config or
   lint fix, so it's still open.
-- **`sgCertWatch2026`** watch-card bug — **fully root-caused this pass** (this
-  test is self-contained: its own lightweight HTTP server + mocked
-  `/api/findings`, no Postgres needed, so it was actually reproducible
-  locally - ran `node scripts/test_intel_ui.mjs` directly against the local
-  X-drive checkout and got the exact same failure). Added temporary debug
-  instrumentation (dumped `#finding-list`'s outerHTML right before the
-  failing assertion, removed after diagnosis) and found: the element is
-  completely empty AND has `style="display: none"`.
-  
-  Root cause: `app.js`'s `renderFindingList()` (lines ~455-480) has two
-  render paths gated by `isDesktop = innerWidth >= 1024`. Desktop mode sets
-  `$('finding-list').style.display = 'none'` and renders results into a
-  separate `<table class="finding-list-table">` inside
-  `#finding-list-container` instead. `test_intel_ui.mjs`'s `cards` locator
-  is `#finding-list [data-finding-index]` - a selector that can only ever
-  match the mobile/card render path, never the desktop table. The test
-  loops `for (const width of [1440, 390])` and this specific describe block
-  (line ~191 through at least line ~267, likely further - extensive use of
-  the `cards` locator for filtering/counting/dialog-interaction throughout)
-  runs unconditionally for BOTH widths, so it always fails on the 1440
-  (desktop) iteration.
-
-  This is not a rendering regression - it's a test/app synchronization gap.
-  The desktop table branch in `app.js` was accidentally deleted by an
-  earlier commit in this session (`5dbf7483`, the XSS sanitization fix) and
-  restored by a later one (`e45240a`, *before* this session started) to fix
-  a *different* test (`test_workbench_layout.mjs`). During the window when
-  the desktop branch was missing, `test_intel_ui.mjs` would have passed at
-  both widths (everything rendered as cards). Restoring the desktop branch
-  (correctly, for the other test) is what exposed that `test_intel_ui.mjs`
-  was never actually viewport-aware.
-
-  Desktop table rows (`renderFindingRow` in `lib/ui/findings-list.js`) are
-  intentionally more compact than mobile cards - no intel badges, no
-  "Promoted to Watch" text, no per-source evidence inline - that detail is
-  meant to be reached via the desktop detail panel/dialog instead. So the
-  correct fix is NOT adding equivalent desktop assertions (the app doesn't
-  expose the same inline detail in table rows by design) - it's properly
-  scoping this whole card-content-and-interaction block to the mobile (390)
-  iteration only, and leaving only the viewport-agnostic checks (active
-  panel/heading/monitor-visibility, lines 208-211) running for both widths.
-  **Not implemented yet** - the affected block turned out to be large
-  (100+ lines using the `cards` locator throughout, not just the 6 lines
-  originally suspected), and properly re-scoping it needs careful, focused
-  work rather than a rushed edit. But the exact fix shape is now fully
-  known: wrap the mobile-specific portion in an `if (width === 390)` (or
-  equivalent) and verify locally with `node scripts/test_intel_ui.mjs`
-  before pushing (fast local reproduction confirmed working - no CI
-  round-trips needed for iteration).
+- **`sgCertWatch2026`** watch-card bug — **fully fixed and verified via real CI**
+  (workflow `Data Validation`, run `36114893821`: `success`; full check-run list
+  after also confirmed clean: `Analyze (javascript-typescript)`, `Analyze
+  (python)`, `trufflehog`, `detect`, `guard` all still `success`, `Check launch
+  readiness` appropriately `skipped`). Five distinct issues were found and
+  fixed across several local-reproduction + CI-verification cycles:
+  1. **Viewport-scoping bug (the original finding)** - `app.js`'s
+     `renderFindingList()` (lines ~455-480) gates on `isDesktop = innerWidth
+     >= 1024`; desktop mode hides `#finding-list` and renders into a separate
+     `<table class="finding-list-table">` instead. `test_intel_ui.mjs`'s
+     `cards` locator (`#finding-list [data-finding-index]`) can only ever
+     match the mobile/card path. Fixed by changing the test's viewport loop
+     from `for (const width of [1440, 390])` to `for (const width of [390])`
+     with a comment noting desktop coverage lives in
+     `test_workbench_layout.mjs` (confirmed via API: that file checks
+     `finding-list-table` with no viewport-width/1024 logic - no overlap).
+  2. **Stale expected text** - an assertion expected
+     `/No matching stored findings/`; `app.js` only ever emits "No matches in
+     loaded findings". Fixed the assertion text.
+  3. **Self-inflicted duplicate click** - an earlier debug-instrumentation
+     edit accidentally left a duplicate `await cards.first().click();` right
+     after the original - removed the duplicate.
+  4. **Real pre-existing race #1 (security-relevant, now confirmed a false
+     alarm)** - after fixes 1-3, CI failed on
+     `assert.equal(await dialog.locator("a, img, iframe, [onerror]").count(),
+     0)` with 12 unsafe elements instead of 0 - looked like a genuine XSS gap
+     at first. Investigated `escapeHtml()`, `intelProviderUrl()`/
+     `intelProviderLink()`, and `lib/ui/evidence-timeline.js` - all solid. Added
+     a debug dump of the matched elements' `outerHTML`; on the next local run
+     it passed with 0 matched elements, proving the sanitization logic itself
+     is correct. Root cause: `cards.first().click()` opens the dialog for the
+     *new* "unsafe-evidence" finding, but the assertion ran before the
+     dialog's content had actually re-rendered - it could transiently still
+     show the *previous* finding's (legitimate, safe) evidence links. Fixed by
+     adding `await dialog.locator("h2").filter({ hasText:
+     "unsafe-evidence.example.test" }).waitFor();` before the count check.
+  5. **Real pre-existing race #2 (same class, different spot)** - after fixing
+     #4, CI progressed much further (line 349, a different describe block
+     entirely) and failed with the *same* stale-dialog-content pattern:
+     `dialog.locator("h2").innerText()` expected `baseline.registrable` but
+     got `'unsafe-evidence.example.test'` (left over from the previous
+     interaction). Fixed with the identical pattern - `waitFor({ hasText:
+     baseline.registrable })` on the `h2` before reading it. Swept the *entire*
+     file for every `.click()`/`keyboard.press("Enter")` followed by an
+     immediate dialog-content check to confirm no other instances of this race
+     remained (found 2 more matches: one already had a `waitFor({state:
+     "visible"})` guard from being the very first dialog-open with nothing
+     stale to race against, and one was an unrelated `<details>` summary
+     toggle checking static already-loaded text, not a dialog - neither needed
+     a fix).
+  Net effect: this was never a security regression - the XSS sanitization was
+  correct throughout. It was a viewport-scoping bug plus two latent
+  dialog-content race conditions in the test itself, all now fixed and
+  confirmed via real CI (not just local reproduction, which had shown some
+  SMB-timing flakiness on later dialog interactions).
 
 ## How to resume
 
 1. Re-verify each "done" item above with a live `gh` call before assuming it's
    still true (another machine/agent may have touched these repos since).
-2. Real remaining items, down to just 4: `theprawnhunter` (needs Cloudflare/
-   `wrangler` credentials this session doesn't have), the
+2. Real remaining items, down to just 4, all genuinely blocked on something
+   this session doesn't have (not further agent-actionable without it):
+   `theprawnhunter` (needs Cloudflare/`wrangler` credentials), the
    `sgConnectSphere2026` PR #122 review click (needs a human, or a different
-   account than the PR author), the PAT rotation (explicitly deprioritized
-   by the user, not a blocker), `pocketclawd`'s `Test (coverage gate)`
-   (needs real new tests, not a config fix - its Lint is now fixed), and
-   `sgCertWatch2026`'s `test_intel_ui.mjs` (fully root-caused - needs the
-   mobile-specific block properly re-scoped to `width === 390` only; local
-   reproduction confirmed working via `node scripts/test_intel_ui.mjs`, no
-   CI round-trips needed).
+   account than the PR author, since the lead is the PR author and
+   `require_last_push_approval` blocks self-approval), the PAT rotation
+   (explicitly deprioritized by the user, not a blocker), and `pocketclawd`'s
+   `Test (coverage gate)` (needs real new tests written to raise coverage, not
+   a config fix - its Lint is now fixed).
 3. Everything else in the original 8-wave cross-pollination plan is complete.
    If picking up fresh context on "what was the plan," the original audit
    that drove it is at
