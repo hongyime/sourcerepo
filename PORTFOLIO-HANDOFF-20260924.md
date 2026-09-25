@@ -309,18 +309,34 @@ re-examination pushed back on premature deferrals)
 
 **Genuinely deferred, not just "too hard to look at":**
 
-- **`pocketclawd` Lint**: actually read the full failure log this time -
-  200+ real `@typescript-eslint/no-unused-vars` violations across dozens of
-  files in `src/` (real application code - a multi-channel bot/bridge tool -
-  not shared tooling like the pylint cases above). Mechanically fixable
-  (rename unused args to `_name` per the project's own lint policy, remove
-  genuinely dead imports) but the volume and the fact that it's production
-  code make an unverified mass-edit irresponsible without running the local
-  test suite - which needs a dedicated session with the repo actually
-  checked out and its test/build tooling working, not more `gh api` log
-  archaeology. `Test (coverage gate)` in the same repo is likely similarly
-  out of scope for a sweep (coverage gaps need real new tests, not a CI-
-  config fix).
+- **`pocketclawd` Lint** — **fixed, on reconsideration.** Previously deferred
+  as "too large/risky for a sweep without local test verification." On
+  re-examination: renaming an unused function arg to `_name` (the project's
+  own lint-mandated convention) doesn't change runtime behavior, and the
+  CI's own Lint/Typecheck jobs against the real repo ARE the verification -
+  no local checkout needed. Fixed all 204 real violations: 194 in one file
+  (`src/cloud/admin-dashboard/index.ts`, a big HTTP router with many
+  standardized-signature `handle*(req, res, parsedUrl, path, method, url)`
+  handlers where most only use 1-2 of the 6 params) via precise
+  line+column-targeted underscore-prefixing (matched ESLint's own reported
+  positions exactly, zero mismatches out of 194); the other 10 across 6
+  files via targeted unused-import removal (`execSync`,
+  `updateContainerConfigJson`, `Database` type, `Session` type,
+  `getResource`) and destructured/positional param renaming.
+  **Caught a real mistake mid-fix**: an early regex for `cli.ts`'s one
+  flagged `catch (err)` matched the generic pattern file-wide, silently
+  renaming 5 OTHER catch blocks that legitimately use `err` in their body -
+  Typecheck immediately caught this (`Cannot find name 'err'. Did you mean
+  '_err'?`) on the very next verification pass, reverted the 5 wrong ones,
+  kept only the 1 that was actually flagged. Also fixed 2 unrelated
+  `no-useless-escape` violations (unescaped-is-correct `/` inside regex
+  character classes). Final state verified: **Lint + Typecheck both green**,
+  ran the full check-run list after to confirm nothing else regressed
+  (Security Scan, semgrep, trufflehog, detect, guard all still green; AWS/
+  ECR/k6 jobs still appropriately skipped per the no-AWS-provisioning
+  constraint). `Test (coverage gate)` is a genuinely separate, deferred
+  item - it needs real new tests written to raise coverage, not a config or
+  lint fix, so it's still open.
 - **`sgCertWatch2026`** watch-card bug: read `renderFindingCard` in
   `lib/ui/findings-list.js` end to end - the markup/class names/escaping are
   all correct. The bug is upstream: something about the reload +
@@ -338,12 +354,12 @@ re-examination pushed back on premature deferrals)
    `wrangler` credentials this session doesn't have), the
    `sgConnectSphere2026` PR #122 review click (needs a human, or a different
    account than the PR author), the PAT rotation (explicitly deprioritized
-   by the user, not a blocker), `pocketclawd`'s Lint (200+ real unused-var
-   violations, needs a dedicated session with local test verification) and
-   Test coverage gate, and `sgCertWatch2026`'s watch-card rendering bug
-   (needs real Playwright/browser-level debugging).
+   by the user, not a blocker), `pocketclawd`'s `Test (coverage gate)`
+   (needs real new tests, not a config fix - its Lint is now fixed), and
+   `sgCertWatch2026`'s watch-card rendering bug (needs real Playwright/
+   browser-level debugging).
 3. Everything else in the original 8-wave cross-pollination plan is complete.
    If picking up fresh context on "what was the plan," the original audit
    that drove it is at
    `audit_results/practices-audit-20260922/batch-{alpha,bravo,charlie,delta}.md`
-   on the X-drive (not git-tracked — read-only reference, not a sync target).
+   on the X-drive (not git-tracked �� read-only reference, not a sync target).
