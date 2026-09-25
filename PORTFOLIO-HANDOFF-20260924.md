@@ -337,14 +337,55 @@ re-examination pushed back on premature deferrals)
   constraint). `Test (coverage gate)` is a genuinely separate, deferred
   item - it needs real new tests written to raise coverage, not a config or
   lint fix, so it's still open.
-- **`sgCertWatch2026`** watch-card bug: read `renderFindingCard` in
-  `lib/ui/findings-list.js` end to end - the markup/class names/escaping are
-  all correct. The bug is upstream: something about the reload +
-  visibility-change refresh sequence in `test_intel_ui.mjs` ends up passing
-  zero findings to the renderer for the "Domains to watch now" view. This
-  needs real Playwright/browser-level stepping-through, not more static code
-  reading - genuinely different tooling than everything else fixed this
-  session, not a stalling excuse.
+- **`sgCertWatch2026`** watch-card bug — **fully root-caused this pass** (this
+  test is self-contained: its own lightweight HTTP server + mocked
+  `/api/findings`, no Postgres needed, so it was actually reproducible
+  locally - ran `node scripts/test_intel_ui.mjs` directly against the local
+  X-drive checkout and got the exact same failure). Added temporary debug
+  instrumentation (dumped `#finding-list`'s outerHTML right before the
+  failing assertion, removed after diagnosis) and found: the element is
+  completely empty AND has `style="display: none"`.
+  
+  Root cause: `app.js`'s `renderFindingList()` (lines ~455-480) has two
+  render paths gated by `isDesktop = innerWidth >= 1024`. Desktop mode sets
+  `$('finding-list').style.display = 'none'` and renders results into a
+  separate `<table class="finding-list-table">` inside
+  `#finding-list-container` instead. `test_intel_ui.mjs`'s `cards` locator
+  is `#finding-list [data-finding-index]` - a selector that can only ever
+  match the mobile/card render path, never the desktop table. The test
+  loops `for (const width of [1440, 390])` and this specific describe block
+  (line ~191 through at least line ~267, likely further - extensive use of
+  the `cards` locator for filtering/counting/dialog-interaction throughout)
+  runs unconditionally for BOTH widths, so it always fails on the 1440
+  (desktop) iteration.
+
+  This is not a rendering regression - it's a test/app synchronization gap.
+  The desktop table branch in `app.js` was accidentally deleted by an
+  earlier commit in this session (`5dbf7483`, the XSS sanitization fix) and
+  restored by a later one (`e45240a`, *before* this session started) to fix
+  a *different* test (`test_workbench_layout.mjs`). During the window when
+  the desktop branch was missing, `test_intel_ui.mjs` would have passed at
+  both widths (everything rendered as cards). Restoring the desktop branch
+  (correctly, for the other test) is what exposed that `test_intel_ui.mjs`
+  was never actually viewport-aware.
+
+  Desktop table rows (`renderFindingRow` in `lib/ui/findings-list.js`) are
+  intentionally more compact than mobile cards - no intel badges, no
+  "Promoted to Watch" text, no per-source evidence inline - that detail is
+  meant to be reached via the desktop detail panel/dialog instead. So the
+  correct fix is NOT adding equivalent desktop assertions (the app doesn't
+  expose the same inline detail in table rows by design) - it's properly
+  scoping this whole card-content-and-interaction block to the mobile (390)
+  iteration only, and leaving only the viewport-agnostic checks (active
+  panel/heading/monitor-visibility, lines 208-211) running for both widths.
+  **Not implemented yet** - the affected block turned out to be large
+  (100+ lines using the `cards` locator throughout, not just the 6 lines
+  originally suspected), and properly re-scoping it needs careful, focused
+  work rather than a rushed edit. But the exact fix shape is now fully
+  known: wrap the mobile-specific portion in an `if (width === 390)` (or
+  equivalent) and verify locally with `node scripts/test_intel_ui.mjs`
+  before pushing (fast local reproduction confirmed working - no CI
+  round-trips needed for iteration).
 
 ## How to resume
 
@@ -356,8 +397,10 @@ re-examination pushed back on premature deferrals)
    account than the PR author), the PAT rotation (explicitly deprioritized
    by the user, not a blocker), `pocketclawd`'s `Test (coverage gate)`
    (needs real new tests, not a config fix - its Lint is now fixed), and
-   `sgCertWatch2026`'s watch-card rendering bug (needs real Playwright/
-   browser-level debugging).
+   `sgCertWatch2026`'s `test_intel_ui.mjs` (fully root-caused - needs the
+   mobile-specific block properly re-scoped to `width === 390` only; local
+   reproduction confirmed working via `node scripts/test_intel_ui.mjs`, no
+   CI round-trips needed).
 3. Everything else in the original 8-wave cross-pollination plan is complete.
    If picking up fresh context on "what was the plan," the original audit
    that drove it is at
