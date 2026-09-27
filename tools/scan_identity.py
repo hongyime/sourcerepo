@@ -194,7 +194,7 @@ def norm_phone(s: str) -> str:
 
 
 def norm_email(s: str) -> str:
-    """Lowercase, and drop plus-addressing so bryan+gh@x.com matches bryan@x.com."""
+    """Lowercase, and drop plus-addressing so sample.user+gh@x.com matches sample.user@x.com."""
     s = s.strip().lower()
     if "@" not in s:
         return s
