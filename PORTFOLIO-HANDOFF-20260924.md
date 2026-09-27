@@ -4,13 +4,13 @@
 
 **If you are a fresh agent or machine picking this up: read this whole file first.
 GitHub is the source of truth — do NOT trust the X-drive mirror
-(`\\100.92.164.125\x-drive\01 REPOSITORIES`) as current; other machines/agents
+(`\\192.0.2.150\x-drive\01 REPOSITORIES`) as current; other machines/agents
 edit it concurrently and it can be stale. Use `gh` CLI / GitHub API to verify
 real state before acting.**
 
 ## Scope & ground rules
 
-- In scope: repos owned by `hongyime` and `bryanseah234` only.
+- In scope: repos owned by `hongyime` and the separately approved personal account only.
 - Out of scope (do not touch): repos owned by bchuminx, decker757, jininggg,
   Joe-Zhou-Yubin, keene-ng-2024, yinasaurus — collaborator/push access does not
   make these in-scope.
@@ -34,7 +34,7 @@ real state before acting.**
 
 ## Known environment gremlins (don't waste time rediscovering these)
 
-- The SMB mount (`\\100.92.164.125\x-drive\...`) has severe intermittent
+- The SMB mount (`\\192.0.2.150\x-drive\...`) has severe intermittent
   latency: `git status/fetch/pull`, recursive directory listing, and
   `npm test`/`node --test` routinely hang 20s-60s+ for no functional reason.
   Non-recursive listing works fine. **When git/npm hangs, fall back to the
@@ -131,7 +131,7 @@ on `main` via `gh api`, not just locally):
    remaining blocker is the required approving review**
    (`required_approving_review_count: 1`, `require_last_push_approval: true`)
    — the only "review" on record is Copilot's auto-reviewer bailing out on a
-   quota limit, and the PR author (bryanseah234, same identity as this
+   quota limit, and the PR author (the same identity as this
    session's `gh` auth) cannot self-approve. **Needs a human (or a different
    account's) approval to merge.**
 3. **Unpinned GitHub Actions, portfolio-wide** — done. Fixed across 11 repos:
@@ -470,3 +470,5 @@ re-examination pushed back on premature deferrals)
   auto-merge should trigger once limit clears.
 - **pocketclawd `Test (coverage gate)`** — NOW FIXED (see above). ✅
 - **sgConnectSphere2026 PR #122** — re-verified merged (approved by lexinphun2024-debug).
+
+Machine-specific values in this document use privacy placeholders.

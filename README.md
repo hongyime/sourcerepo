@@ -134,6 +134,20 @@ automation disabled until each application's checks are configured.
 
 ## Manual operations
 
+The Python maintenance tools and GitHub CLI are available on Windows and Linux.
+For the shared `.ps1` commands, install PowerShell 7 and invoke them with
+`pwsh -NoProfile -File <script.ps1>` on either platform. Activate a Python virtual
+environment so the existing `python` commands select that environment.
+`tools/workspace/run_source_sync.ps1` is one example; it dispatches an actual
+GitHub Actions sync, so run it only when that external operation is intended.
+
+The numbered `.bat` files and `install_root_bats.ps1` are optional Windows
+convenience launchers. Linux users can run the underlying Python/PowerShell
+commands directly. Use a local path or Linux SMB mount path for `RepoRoot`, not
+an assumed Windows drive. Repository creation/template publishing helpers can
+create repositories, commit, push, and replace files in their temporary checkout;
+they are explicit administration commands, not dependency setup steps.
+
 Sync now (all repos including archived):
 ```bash
 gh workflow run "Sync Repo Settings & General Config to All Repos" --repo hongyime/sourcerepo -f include_archived=true

@@ -168,3 +168,7 @@ Read-only baseline review by opencode/Sisyphus-Junior. No sync configs or workfl
 - Pre-existing uncommitted changes preserved: .agents/STATE.md and .agents/JOURNAL.md (workspace upkeep notes from prior session) and tools/workspace/sync_workspace.py (untouched).
 - Repo purpose confirmed: source-of-truth for all owned repos' shared configs; syncs AGENTS.md, Dependabot, labels, GitHub settings to target repos via workflow; repos.yml is the canonical catalog; tiers.yml classifies external repos.
 - Next: pending open tasks from 2026-09-15 STATE (hosted Linux fixtures, required-check rollout, heartbeat pilot verification) carry over unchanged.
+
+## Reviewed workspace maintenance - 2026-09-27
+
+Publish the reviewed portability and privacy maintenance from the current default branch, preserving concurrent upstream work and original workspace changes. Validation is limited to the documented offline fixtures and hosted checks; no live data job or deployment command was executed locally.

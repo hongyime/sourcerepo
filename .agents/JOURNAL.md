@@ -68,3 +68,5 @@ Local validation: 16 merge-policy/CI-ownership regression tests pass. Four chang
 - 2026-09-10: Published workspace sync repairs through 22d2798; preserved existing clone-layout changes and used safe fast-forward decisions. Full coverage and recovery details are recorded in the workspace maintenance report.
 
 - 2026-09-16: Wave-3 baseline audit (opencode/Sisyphus-Junior). Read-only review: 0 open PRs, 1 open issue (#44 SHELL compliance drift). Secret scan clean (tools/*.py comments only, no credentials). Pre-existing local uncommitted changes preserved (workspace upkeep notes + tools/workspace/sync_workspace.py untouched). No sync configs or workflows modified.
+
+- 2026-09-27: Prepared reviewed portability/privacy changes on the current default branch with maintenance-only file selection and preserved original workspace state.
