@@ -24,10 +24,20 @@ REARCHIVE_FAILED_REPOS=()
 declare -A CASE_PATHS_BY_LOWER=()
 CASE_PATHS_READY=false
 
-# Fetch completely before any repository mutation; never enumerate personal repos.
+# Fetch completely before any repository mutation.
+# Portfolio scope: the hongyime org, plus two explicitly opted-in bryanseah234 user repos
+# (bryanseah234/bryanseah234 and bryanseah234/bryanseah234.github.io) authorized by the owner.
 ORG_REPOS_JSON="$(gh api --paginate "orgs/hongyime/repos?per_page=100")"
-REPOS_JSON="$(printf '%s\n' "$ORG_REPOS_JSON" |
-  jq -s 'add | unique_by(.full_name) | map(select((.owner.login | ascii_downcase) == "hongyime" and .disabled == false and .fork == false))')"
+OPTED_IN_USER_REPOS=("bryanseah234/bryanseah234" "bryanseah234/bryanseah234.github.io")
+USER_REPOS_JSON="[]"
+for _ur in "${OPTED_IN_USER_REPOS[@]}"; do
+  _json="$(gh api "repos/${_ur}" 2>/dev/null || echo '')"
+  if [ -n "$_json" ]; then
+    USER_REPOS_JSON="$(printf '%s\n%s\n' "$USER_REPOS_JSON" "[$_json]" | jq -s 'add')"
+  fi
+done
+REPOS_JSON="$(printf '%s\n%s\n' "$ORG_REPOS_JSON" "$USER_REPOS_JSON" |
+  jq -s 'add | unique_by(.full_name) | map(select(((.owner.login | ascii_downcase) == "hongyime" or (.full_name | ascii_downcase) == "bryanseah234/bryanseah234" or (.full_name | ascii_downcase) == "bryanseah234/bryanseah234.github.io") and .disabled == false and .fork == false))')"
 
 GITIGNORE_MARKER="# AI / editor dot directories (managed via sourcerepo)"
 GITIGNORE_END_MARKER="# End AI / editor dot directories (managed via sourcerepo)"
@@ -272,7 +282,8 @@ while read -r repo; do
   DEFAULT_BRANCH="$(echo "$repo" | jq -r '.default_branch')"
   FULL_NAME="$REPO_OWNER/$REPO_NAME"
 
-  if [ "${REPO_OWNER,,}" != "hongyime" ] || [[ ! "$REPO_NAME" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+  _full_lower="$(printf '%s' "$FULL_NAME" | tr '[:upper:]' '[:lower:]')"
+  if { [ "${REPO_OWNER,,}" != "hongyime" ] && [ "$_full_lower" != "bryanseah234/bryanseah234" ] && [ "$_full_lower" != "bryanseah234/bryanseah234.github.io" ]; } || [[ ! "$REPO_NAME" =~ ^[A-Za-z0-9_.-]+$ ]]; then
     echo "Skipping repository outside ownership scope: $FULL_NAME"
     continue
   fi
