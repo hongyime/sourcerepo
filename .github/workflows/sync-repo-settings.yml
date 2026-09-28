@@ -259,6 +259,7 @@ jobs:
         .github/workflows/lfs-guard.yml|.github/workflows/lfs-guard.yml
         .github/workflows/semgrep.yml|.github/workflows/semgrep.yml
         .github/workflows/bandit.yml|.github/workflows/bandit.yml
+        STANDARDS.md|STANDARDS.md
       COMMIT_MESSAGE: |
         chore(config): sync from sourcerepo [skip ci]
       PR_TITLE: 'chore(config): sync shared configuration'
