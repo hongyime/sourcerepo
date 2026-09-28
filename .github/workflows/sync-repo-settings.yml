@@ -3,7 +3,7 @@ name: Sync Repo Settings & General Config to All Repos
 # COST-OPTIMISED (2026-07-04) + INCLUDES-ARCHIVED (2026-07-06):
 # - Removed `push` trigger — every workflow edit was re-running the full 90-repo
 #   sync, which then triggered every workflow in every target repo (cascade).
-#   Now the sync only runs on the weekly schedule or when manually dispatched.
+#   Now the sync runs on the daily schedule or when manually dispatched.
 # - Added `concurrency` to prevent overlapping runs stacking up.
 # - **Now processes archived repos too** by temporarily unarchiving → applying
 #   changes → re-archiving. Disabled repos are still skipped (they cannot
@@ -16,7 +16,7 @@ on:
         type: boolean
         default: true
   schedule:
-    - cron: "0 9 * * 1" # Weekly Monday 5pm SGT
+    - cron: "0 9 * * *" # Daily 5pm SGT (09:00 UTC)
 
 concurrency:
   group: sync-repo-settings-${{ github.ref }}
@@ -26,7 +26,7 @@ permissions:
   contents: write
 
 env:
-  # Weekly schedule always includes archived. Manual runs use the input flag.
+  # Scheduled runs always include archived. Manual runs use the input flag.
   INCLUDE_ARCHIVED: ${{ github.event_name == 'schedule' && 'true' || inputs.include_archived }}
 
 jobs:
