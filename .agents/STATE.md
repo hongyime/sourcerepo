@@ -172,3 +172,7 @@ Read-only baseline review by opencode/Sisyphus-Junior. No sync configs or workfl
 ## Reviewed workspace maintenance - 2026-09-27
 
 Publish the reviewed portability and privacy maintenance from the current default branch, preserving concurrent upstream work and original workspace changes. Validation is limited to the documented offline fixtures and hosted checks; no live data job or deployment command was executed locally.
+
+## Repository standards manifest - 2026-09-27
+
+Added STANDARDS.md (the authoritative fleet standards manifest: required security workflows, governance files, privacy/portability rules, and the opt-in GHCR packaging pattern) and registered it in the SYNC_ITEMS allowlist of sync-repo-settings.yml so it propagates to all repos on the next sync run. Derived from a live 79-repo compliance audit. New repos also seed it via theprawntemplate.
