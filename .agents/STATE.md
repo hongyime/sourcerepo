@@ -1,3 +1,7 @@
+## Portability maintenance - 2026-09-27
+
+- Documented Linux Python and PowerShell 7 equivalents for Windows convenience wrappers. Repository administration remains an explicit operator action; no remote repository changes ran.
+
 # Current catalog registration - 2026-09-15
 
 PR #53 on `chore/reconcile-repos` is refreshed from current main while retaining

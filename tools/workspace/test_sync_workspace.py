@@ -114,6 +114,27 @@ class SafeSyncTests(unittest.TestCase):
             self.assertEqual(sync.main(), 1)
         self.assertIn("Failed: 1", output.getvalue())
 
+    def test_github_token_reads_env_var(self):
+        with patch.dict(os.environ, {"GITHUB_TOKEN": "my-env-token"}, clear=True):
+            self.assertEqual(sync.github_token(), "my-env-token")
+
+    def test_github_token_falls_back_to_gh_auth_token(self):
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(sync, "run", return_value=completed("gho_cli_token\n")) as mock_run,
+        ):
+            self.assertEqual(sync.github_token(), "gho_cli_token")
+            mock_run.assert_called_once_with(["gh", "auth", "token"], timeout=30)
+
+    def test_github_token_raises_runtime_error_if_unavailable(self):
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(sync, "run", return_value=completed("", code=1)),
+        ):
+            with self.assertRaises(RuntimeError):
+                sync.github_token()
+
 
 if __name__ == "__main__":
     unittest.main()
+

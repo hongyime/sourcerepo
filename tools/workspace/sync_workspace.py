@@ -86,13 +86,18 @@ def run(cmd: list[str], cwd: Path | None = None, timeout: int = 120) -> subproce
 
 def github_token() -> str:
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
-    if not token:
-        raise RuntimeError(
-            "GITHUB_TOKEN (or GH_TOKEN) environment variable is required. gh CLI "
-            "is no longer used for API/clone calls because it hangs unpredictably "
-            "on this workspace -- set the same token gh itself would use."
-        )
-    return token
+    if token:
+        return token
+    proc = run(["gh", "auth", "token"], timeout=30)
+    if proc.returncode == 0 and proc.stdout.strip():
+        token = proc.stdout.strip()
+        os.environ["GITHUB_TOKEN"] = token
+        return token
+    raise RuntimeError(
+        "GITHUB_TOKEN (or GH_TOKEN) environment variable is required, or authenticate via 'gh auth login'. "
+        "Neither an environment token nor a valid 'gh auth token' could be resolved."
+    )
+
 
 
 def github_api(path: str) -> object:

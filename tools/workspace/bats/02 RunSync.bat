@@ -10,6 +10,11 @@ set PYTHONUTF8=1
 :: Prioritize portable Git and Python for this process only
 set "PATH=%~dp0Git\cmd;%~dp0Python;%PATH%"
 
+:: Resolve GitHub token from gh CLI if not already set in environment
+if "%GITHUB_TOKEN%"=="" if "%GH_TOKEN%"=="" (
+  for /f "tokens=*" %%t in ('gh auth token 2^>nul') do set "GH_TOKEN=%%t"
+)
+
 echo Initiating Zero-Install Repository Synchronization...
 echo Repeatable/idempotent: safe to run multiple times.
 echo This pulls updates by fetch + fast-forward. Current repos stay unchanged.

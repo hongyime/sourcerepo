@@ -70,3 +70,5 @@ Local validation: 16 merge-policy/CI-ownership regression tests pass. Four chang
 - 2026-09-16: Wave-3 baseline audit (opencode/Sisyphus-Junior). Read-only review: 0 open PRs, 1 open issue (#44 SHELL compliance drift). Secret scan clean (tools/*.py comments only, no credentials). Pre-existing local uncommitted changes preserved (workspace upkeep notes + tools/workspace/sync_workspace.py untouched). No sync configs or workflows modified.
 
 - 2026-09-27: Prepared reviewed portability/privacy changes on the current default branch with maintenance-only file selection and preserved original workspace state.
+
+- 2026-09-27: Documented Linux Python and PowerShell 7 equivalents for Windows convenience wrappers. Repository administration remains an explicit operator action; no remote repository changes ran.
