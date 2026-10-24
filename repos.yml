@@ -641,3 +641,9 @@ hongyime/sgConnectSphere2026:
   homepage: "https://sgconnectsphere.vercel.app"
   topics:
     - no-config-sync
+
+hongyime/adsblocker:
+  description: "Pi-hole DNS ad-blocker deployment for the hongyime homelab"
+  homepage: ""
+  visibility: private
+  topics: []
