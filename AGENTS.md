@@ -124,7 +124,7 @@ not assume one shared MCP config is read by every agent.
 ## Syncing Strategy
 
 ### Source of Truth
-- **Primary**: sourcerepo 仓库作为唯一真源（Skills、MCP、通用配置、仓库设置）
+- **Primary**: sourcerepo 仓库作为唯一真源（MCP、通用配置、仓库设置）
 - **Secondary**: 目标仓库保留仓库特定覆盖（需在 sync 后自行维护）
 
 ### Sync Workflows

@@ -18,6 +18,7 @@ Fleet Sync Reliability & Security Repair, portfolio retirement, and live product
 - Repaired retries, empty-repository seeding, metadata decoding, personal opt-ins,
   and blob-gated retired-file cleanup in fleet sync.
 - Retired the root skill bundle, obsolete shared files, and named history dumps.
+- 2026-11-14: docs/skills-manifest.md now names hongyime/theprawnskills as the single skills home and repo-standardization as the SHELL standard's home; AGENTS.md source-of-truth line no longer claims Skills (retired from this repo in b01008a).
 - Updated catalog and workspace tooling with focused regression coverage.
 - Full verification passed (138 tests total, shell syntax, workflow YAML parsing).
 - Committed (`b01008a`) and pushed to `origin/main`.
