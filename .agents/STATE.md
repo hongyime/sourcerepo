@@ -6,11 +6,11 @@
 
 ## Task
 
-Fleet Sync Reliability & Security Repair and portfolio retirement.
+Fleet Sync Reliability & Security Repair, portfolio retirement, and live production dispatch.
 
 ## Status
 
-`pushed` — all 18 reliability/security findings implemented, verified, committed, and pushed to main.
+`complete` — all 18 reliability/security findings implemented, verified, committed, pushed to main, and live fleet sync dispatch completed successfully.
 
 ## Done
 
@@ -20,9 +20,13 @@ Fleet Sync Reliability & Security Repair and portfolio retirement.
 - Retired the root skill bundle, obsolete shared files, and named history dumps.
 - Updated catalog and workspace tooling with focused regression coverage.
 - Full verification passed (138 tests total, shell syntax, workflow YAML parsing).
-- Committed and pushed to origin/main.
-- Triggered manual workflow dispatch for live fleet verification.
+- Committed (`b01008a`) and pushed to `origin/main`.
+- Live fleet dispatch triggered (`run 43558817027` on `sync-repo-settings.yml`) and completed successfully:
+  - `configure-repo-settings` passed (31s)
+  - `propagate-secrets` passed (41s)
+  - `force-sync-general-config` passed (8m48s)
+- Verified real-time downstream propagation: retired managed blobs (.github/greetings.yml, .github/FUNDING.yml) removed, dot-directory exclusions updated in .gitignore, contribution contracts preserved, and configs pushed across all fleet repos including opted-in personal repos (`bryanseah234/bryanseah234` and `bryanseah234/bryanseah234.github.io`).
 
 ## Next steps
 
-- Monitor the dispatched `sync-repo-settings.yml` workflow run on GitHub Actions.
+- None. All audit items, code pushes, and remote dispatch verifications are fully complete.
