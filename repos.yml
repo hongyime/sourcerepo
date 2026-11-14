@@ -641,3 +641,22 @@ hongyime/sgConnectSphere2026:
   homepage: "https://sgconnectsphere.vercel.app"
   topics:
     - no-config-sync
+
+hongyime/adsblocker:
+  description: "Pi-hole DNS ad-blocker deployment for the hongyime homelab"
+  homepage: ""
+  visibility: private
+  topics: []
+hongyime/pairpeers:
+  description: "PairPeers — invite-only, friends-vouch-friends dating webapp. Vouched, not swiped."
+  homepage: "https://pairpeers.vercel.app"
+  topics: []
+hongyime/shotsift:
+  description: "ShotSift: edge AI photo culling for event photographers — ASUS UGen AI League entry (Creator AI, Lightning)"
+  homepage: ""
+  topics: []
+hongyime/upstashalive:
+  description: "Cloudflare Worker cron that keeps Upstash Redis free-tier databases alive via periodic writes (sibling of supabasealive)."
+  homepage: ""
+  visibility: private
+  topics: []
