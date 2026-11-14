@@ -14,7 +14,12 @@ NODE = r"""
 const fs = require('fs');
 const input = JSON.parse(fs.readFileSync(0, 'utf8'));
 const calls = [], failures = [];
-const api = {repos: {listForOrg: 'org', listForAuthenticatedUser: 'personal', update: async payload => {
+const api = {repos: {listForOrg: 'org', listForAuthenticatedUser: 'personal', get: async payload => {
+  calls.push(['get', payload]);
+  const found = input.personalRepos.find(repo => repo.owner.login === payload.owner && repo.name === payload.repo);
+  if (!found) throw Object.assign(new Error('missing fixture repository'), {status: 404});
+  return found;
+}, update: async payload => {
   calls.push(['update', payload]);
   if (input.failSettings && 'has_issues' in payload) throw Object.assign(new Error('fixture failure'), {status: 403});
 }}};
@@ -42,11 +47,17 @@ def repo(name="app", owner="hongyime", **extra):
     return dict(name=name, owner={"login": owner}, archived=False, fork=False, disabled=False, private=True, **extra)
 
 
+def opted_in_repos():
+    return [repo("bryanseah234", "bryanseah234"), repo("bryanseah234.github.io", "bryanseah234")]
+
+
 class SyncSettings(unittest.TestCase):
-    def run_settings(self, repos=None, settings=None, owner="hongyime", include=True, fail=False):
+    def run_settings(self, repos=None, settings=None, owner="hongyime", include=True, fail=False,
+                     personal_repos=None):
         script = SCRIPT.replace("${{ github.repository_owner }}", owner).replace("${{ env.INCLUDE_ARCHIVED }}", str(include).lower())
         result = subprocess.run([shutil.which("node"), "-e", NODE], input=json.dumps({
-            "script": script, "repos": repos or [repo()], "settings": settings or {}, "failSettings": fail
+            "script": script, "repos": repos or [repo()], "settings": settings or {}, "failSettings": fail,
+            "personalRepos": opted_in_repos() if personal_repos is None else personal_repos,
         }), text=True, capture_output=True, timeout=15, check=True)
         return json.loads(result.stdout)
 
@@ -56,7 +67,21 @@ class SyncSettings(unittest.TestCase):
         result = self.run_settings(repos)
         self.assertEqual(result["failures"], [])
         self.assertEqual([c[1] for c in result["calls"] if c[0] == "list"], ["org"])
-        self.assertEqual([c[1]["repo"] for c in result["calls"] if c[0] == "update"], ["app"])
+        self.assertEqual(
+            [f"{c[1]['owner']}/{c[1]['repo']}" for c in result["calls"] if c[0] == "update"],
+            ["hongyime/app", "bryanseah234/bryanseah234", "bryanseah234/bryanseah234.github.io"],
+        )
+
+    def test_both_opted_in_personal_repositories_receive_settings(self):
+        settings = {
+            "bryanseah234/bryanseah234": {"description": "profile"},
+            "bryanseah234/bryanseah234.github.io": {"homepage": "https://example.invalid/#site"},
+        }
+        result = self.run_settings(settings=settings)
+        updates = {f"{call[1]['owner']}/{call[1]['repo']}": call[1]
+                   for call in result["calls"] if call[0] == "update"}
+        self.assertEqual(updates["bryanseah234/bryanseah234"]["description"], "profile")
+        self.assertEqual(updates["bryanseah234/bryanseah234.github.io"]["homepage"], "https://example.invalid/#site")
 
     def test_missing_or_invalid_visibility_is_omitted(self):
         for value in (None, "internal", ""):
@@ -76,11 +101,15 @@ class SyncSettings(unittest.TestCase):
     def test_archive_flag_and_restoration_after_failed_settings(self):
         archived = [{**repo(), "archived": True}]
         skipped = self.run_settings(archived, include=False)
-        self.assertFalse(any(c[0] == "update" for c in skipped["calls"]))
+        self.assertFalse(any(
+            call[0] == "update" and call[1].get("owner") == "hongyime"
+            for call in skipped["calls"]
+        ))
         result = self.run_settings(archived, fail=True)
         updates = [c[1] for c in result["calls"] if c[0] == "update"]
-        self.assertFalse(updates[0]["archived"])
-        self.assertTrue(updates[-1]["archived"])
+        archive_updates = [payload for payload in updates if "archived" in payload]
+        self.assertFalse(archive_updates[0]["archived"])
+        self.assertTrue(archive_updates[-1]["archived"])
 
     def test_wrong_source_owner_fails_before_api_calls(self):
         result = self.run_settings(owner="held-account")
@@ -93,6 +122,8 @@ class SyncSettings(unittest.TestCase):
         secret_step = next(s["run"] for s in WORKFLOW["jobs"]["propagate-secrets"]["steps"] if "gh secret set" in s.get("run", ""))
         self.assertNotIn("user/repos", secret_step)
         self.assertIn('orgs/hongyime/repos?', secret_step)
+        self.assertIn('bryanseah234/bryanseah234', secret_step)
+        self.assertIn('bryanseah234/bryanseah234.github.io', secret_step)
         self.assertIn('^hongyime/[A-Za-z0-9_.-]+$', secret_step)
         self.assertIn('.fork==false', secret_step)
         # Query assignment must finish before the mutation loop begins.

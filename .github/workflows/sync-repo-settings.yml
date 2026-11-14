@@ -110,16 +110,35 @@ jobs:
             console.log(
               `Loaded per-repo metadata entries for ${Object.keys(repoSettings).length} repos`
             );
+            const failures = [];
+            const optedInPersonalRepos = [
+              'bryanseah234/bryanseah234',
+              'bryanseah234/bryanseah234.github.io'
+            ];
             const orgRepos = await withRetry(() =>
               github.paginate(github.rest.repos.listForOrg, {
                 org: 'hongyime',
                 per_page: 100
               })
             );
-            const repos = orgRepos.filter(r => r.owner?.login?.toLowerCase() === 'hongyime'
-              && !r.fork && !r.disabled && /^[A-Za-z0-9_.-]+$/.test(r.name));
-            console.log(`Found ${repos.length} eligible hongyime repos; includeArchived=${includeArchived}`);
-            const failures = [];
+            const personalRepos = [];
+            for (const fullName of optedInPersonalRepos) {
+              const [repoOwner, repo] = fullName.split('/');
+              try {
+                personalRepos.push(await withRetry(() =>
+                  github.rest.repos.get({ owner: repoOwner, repo })
+                ));
+              } catch (error) {
+                console.log(`❌ Failed to load opted-in personal repo ${fullName}: ${error.message}`);
+                failures.push(`${fullName} (metadata failed)`);
+              }
+            }
+            const repos = [...orgRepos, ...personalRepos].filter(r => {
+              const fullName = `${r.owner?.login}/${r.name}`.toLowerCase();
+              return (fullName.startsWith('hongyime/') || optedInPersonalRepos.includes(fullName))
+                && !r.fork && !r.disabled && /^[A-Za-z0-9_.-]+$/.test(r.name);
+            });
+            console.log(`Found ${repos.length} eligible repositories; includeArchived=${includeArchived}`);
             for (const repo of repos) {
               if (repo.disabled) {
                 console.log(`Skipping disabled repo: ${repo.name}`);
@@ -209,10 +228,18 @@ jobs:
         run: |
           # gh secret set works on archived repos without needing to unarchive.
           # Complete the owned-only lookup before propagating any secret.
-          REPOS="$(gh api --paginate "orgs/hongyime/repos?per_page=100" --jq '.[] | select(.disabled==false and .fork==false and (.owner.login | ascii_downcase) == "hongyime") | .full_name')"
+          set -euo pipefail
+          REPOS="$(
+            {
+              gh api --paginate "orgs/hongyime/repos?per_page=100" --jq '.[] | select(.disabled==false and .fork==false and (.owner.login | ascii_downcase) == "hongyime") | .full_name'
+              for repo in bryanseah234/bryanseah234 bryanseah234/bryanseah234.github.io; do
+                gh api "repos/$repo" --jq 'select(.disabled==false and .fork==false) | .full_name'
+              done
+            } | sort -u
+          )"
           printf '%s\n' "$REPOS" | sort -u \
           | while IFS= read -r repo; do
-              [[ "$repo" =~ ^hongyime/[A-Za-z0-9_.-]+$ ]] || continue
+              [[ "$repo" =~ ^hongyime/[A-Za-z0-9_.-]+$ || "$repo" == bryanseah234/bryanseah234 || "$repo" == bryanseah234/bryanseah234.github.io ]] || continue
               echo "$GH_PAT" | gh secret set GH_PAT --repo "$repo" && echo "Set GH_PAT: $repo" || echo "Failed: $repo"
             done
 
@@ -230,7 +257,7 @@ jobs:
       # Application CI belongs to each repository; never replace it with the
       # source repository's own build/test workflow.
       SYNC_ITEMS: |
-        .github/dependabot_config.yml|.github/dependabot.yml
+        .github/dependabot.yml|.github/dependabot.yml
         .deepsource.toml|.deepsource.toml
         .sourcery.yml|.sourcery.yml
         .github/workflows/trufflehog.yml|.github/workflows/trufflehog.yml
@@ -251,9 +278,7 @@ jobs:
         .gitattributes|.gitattributes
         .github/labels.yml|.github/labels.yml
         .github/workflows/labeler.yml|.github/workflows/labeler.yml
-        .github/greetings.yml|.github/greetings.yml
         .github/workflows/greetings.yml|.github/workflows/greetings.yml
-        .github/FUNDING.yml|.github/FUNDING.yml
         AGENTS.md|AGENTS.md
         .github/workflows/heartbeat.yml|.github/workflows/heartbeat.yml
         .github/workflows/lfs-guard.yml|.github/workflows/lfs-guard.yml

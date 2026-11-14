@@ -122,8 +122,8 @@ jobs:
 
           entry = [
               f"{full_name}:",
-              f'  description: "{description}"',
-              f'  homepage: "{homepage}"',
+              f"  description: {json.dumps(description)}",
+              f"  homepage: {json.dumps(homepage)}",
           ]
           if visibility == "private":
               entry.append("  visibility: private")

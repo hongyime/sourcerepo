@@ -58,6 +58,19 @@ def get_readme_path(repo_path):
     return None
 
 
+def repository_paths(workspace: Path):
+    """Yield repositories stored directly in the workspace or below an owner folder."""
+    for item in sorted(workspace.iterdir()):
+        if not item.is_dir() or item.name in EXCLUDED_DIRS or item.name.startswith("."):
+            continue
+        if is_git_repo(item):
+            yield item
+            continue
+        for child in sorted(item.iterdir()):
+            if child.is_dir() and is_git_repo(child):
+                yield child
+
+
 def optimize_for_llm(text):
     """
     Cleans and minifies Markdown text specifically for AI ingestion.
@@ -98,14 +111,7 @@ def main():
     total_chars = 0
 
     # 1. Extraction & Optimization Phase
-    for item in sorted(workspace.iterdir()):
-        if not item.is_dir():
-            continue
-        if item.name in EXCLUDED_DIRS or item.name.startswith("."):
-            continue
-        #if not is_git_repo(item):
-        #    continue
-
+    for item in repository_paths(workspace):
         readme_file = get_readme_path(item)
         if readme_file:
             try:
@@ -118,7 +124,7 @@ def main():
                 if not content:
                     continue
 
-                repo_name = item.name
+                repo_name = item.relative_to(workspace).as_posix().replace("/", "_")
                 lines = content.count('\n') + 1
                 total_lines += lines
                 total_chars += len(content)

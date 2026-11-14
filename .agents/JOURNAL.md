@@ -27,6 +27,10 @@
 - 2026-09-10: Linux CI run 34453272672 passed all eleven config-sync fixture checks, including file preservation, failed metadata, opt-outs, copy conflicts and archive restoration. Local Windows/WSL attempts were environment failures; no live organization sync was run.
 
 
+## 2026-11-14 — Fleet sync reliability/security repair started
+
+Implementation is limited to the approved reliability and security plan: shared config sync, its fixtures, catalog YAML loading, and workspace tooling. No live GitHub API dispatch or fleet sync is authorized for this repair.
+
 ## 2026-09-12 — checked bot merges
 
 Accepted portfolio upkeep: fix the verified early dependency merge and admin bypass. Preserve the original workspace edits.
@@ -72,3 +76,6 @@ Local validation: 16 merge-policy/CI-ownership regression tests pass. Four chang
 - 2026-09-27: Prepared reviewed portability/privacy changes on the current default branch with maintenance-only file selection and preserved original workspace state.
 
 - 2026-09-27: Documented Linux Python and PowerShell 7 equivalents for Windows convenience wrappers. Repository administration remains an explicit operator action; no remote repository changes ran.
+
+- 2026-11-14: Completed the approved fleet-sync reliability/security repair locally. The next normal daily sync can seed declared branches for empty repositories and delete only exact retired managed blobs; no live GitHub API dispatch or fleet sync was run for validation.
+- 2026-11-14: Verified all 18 fleet-sync reliability, security, and cleanup repairs across local suites (138 tests passing). Committed and pushed to main; dispatched live sync workflow for verified fleet propagation.

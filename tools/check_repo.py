@@ -16,6 +16,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 
 OWNERS = {"hongyime", "bryanseah234"}
 NOTICE_TEXT = "Copyright 2026 The Prawn Organisation"
@@ -44,73 +46,11 @@ def run(cmd: list[str], cwd: Path | None = None, timeout: int = 30) -> tuple[int
 
 
 def parse_simple_yaml(path: Path) -> dict[str, Any]:
-    """Parse the small YAML subset used by tiers.yml, repos.yml, topics.yml."""
+    """Load the repository catalog YAML without accepting unsafe constructors."""
     if not path.is_file():
         return {}
-    root: dict[str, Any] = {}
-    current_key: str | None = None
-    current_repo: str | None = None
-    current_field: str | None = None
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.split("#", 1)[0].rstrip()
-        if not line.strip():
-            continue
-        if not line.startswith(" "):
-            key, _, rest = line.partition(":")
-            key = key.strip()
-            rest = rest.strip()
-            current_key = key
-            current_repo = None
-            current_field = None
-            root[key] = scalar(rest) if rest else {}
-            continue
-        if current_key is None:
-            continue
-        stripped = line.strip()
-        container = root.setdefault(current_key, {})
-        if stripped.startswith("- "):
-            value = scalar(stripped[2:].strip())
-            if isinstance(container, list):
-                container.append(value)
-            else:
-                root[current_key] = [value]
-            continue
-        if line.startswith("  ") and not line.startswith("    "):
-            key, _, rest = stripped.partition(":")
-            if "/" in key and rest == "":
-                current_repo = key
-                current_field = None
-                if not isinstance(container, dict):
-                    root[current_key] = {}
-                    container = root[current_key]
-                container[current_repo] = {}
-            elif current_repo and isinstance(container, dict):
-                current_field = key
-                container[current_repo][key] = scalar(rest.strip()) if rest.strip() else []
-            elif isinstance(container, dict):
-                current_field = key
-                container[key] = scalar(rest.strip()) if rest.strip() else []
-        elif line.startswith("    ") and current_repo and current_field:
-            if stripped.startswith("- "):
-                container = root[current_key]
-                values = container[current_repo].setdefault(current_field, [])
-                if isinstance(values, list):
-                    values.append(scalar(stripped[2:].strip()))
-    return root
-
-
-def scalar(value: str) -> Any:
-    if value in {"", "null", "~"}:
-        return ""
-    if value == "[]":
-        return []
-    if value in {"true", "false"}:
-        return value == "true"
-    if (value.startswith('"') and value.endswith('"')) or (
-        value.startswith("'") and value.endswith("'")
-    ):
-        return value[1:-1]
-    return value
+    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    return loaded if isinstance(loaded, dict) else {}
 
 
 def sourcerepo_root() -> Path:

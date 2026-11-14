@@ -1,20 +1,20 @@
 # sourcerepo
 
-Central automation hub for all personal GitHub repositories. Every owned, non-disabled repo gets configuration, workflows, and hygiene rules synced from here on a weekly cadence.
+Central automation hub for all personal GitHub repositories. Every owned, non-disabled repo gets configuration, workflows, and hygiene rules synced from here on a daily cadence.
 
 ## How it works
 
-**Single workflow, weekly cron, cascade-safe.**
+**Single workflow, daily cron, cascade-safe.**
 
 | Workflow | Purpose | Trigger |
 |----------|---------|---------|
-| `sync-repo-settings.yml` | Repo settings + secrets + config files across all repos | Weekly Mon 5pm SGT + manual dispatch |
+| `sync-repo-settings.yml` | Repo settings + secrets + config files across all repos | Daily 5pm SGT + manual dispatch |
 
 Underlying script: [`.github/scripts/sync-selected-paths.sh`](.github/scripts/sync-selected-paths.sh)
 
-### Why weekly and not hourly?
+### Why daily and not hourly?
 
-Previously ran every 3 hours across 3 workflows → hit spending limit repeatedly. The cost-optimised weekly schedule + `[skip ci]` on downstream commits (to prevent fan-out cascade) cut Actions usage by an estimated 60–75%.
+Previously ran every 3 hours across 3 workflows → hit spending limit repeatedly. The cost-optimised daily schedule + `[skip ci]` on downstream commits (to prevent fan-out cascade) avoids that fan-out while keeping shared configuration current.
 
 ### Cascade prevention
 
@@ -31,7 +31,7 @@ without publishing a partial copy.
 Repository enumeration must succeed before work starts. Topic lookup failures
 skip the affected repository and make the job fail; `no-config-sync` is checked
 before cloning or changing archive state. Metadata, clone, copy and push failures
-return a nonzero status. Existing weekly scheduling and downstream skip-CI commit
+return a nonzero status. Existing daily scheduling and downstream skip-CI commit
 messages are unchanged. Files removed by earlier syncs need a separate review of
 Git history; this change prevents repeat deletion and does not guess how to restore them.
 
@@ -48,10 +48,10 @@ Every non-disabled repo (**including archived** — see below) receives:
 |------|-------------|
 | GitHub Actions workflows | `codeql.yml`, `scorecard.yml`, `trufflehog.yml`, `heartbeat.yml`, `lfs-guard.yml`, `dependabot-auto-merge.yml`, `auto-merge-bots.yml`, `dependency-review.yml`, `summary.yml`, `labeler.yml`, `greetings.yml` |
 | Bot merge policy | `.github/scripts/checked-bot-merge.py` |
-| Dependabot config | `.github/dependabot_config.yml` → `.github/dependabot.yml` |
+| Dependabot config | `.github/dependabot.yml` |
 | Issue + PR templates | `.github/ISSUE_TEMPLATE/*`, `.github/pull_request_template.md` |
 | Community files | `CONTRIBUTING.md`, `SECURITY.md`, `AGENTS.md` |
-| Config | `.gitattributes`, `.deepsource.toml`, `.sourcery.yml`, `.github/labels.yml`, `.github/greetings.yml`, `.github/FUNDING.yml`, `LICENSE`, `NOTICE` |
+| Config | `.gitattributes`, `.deepsource.toml`, `.sourcery.yml`, `.github/labels.yml`, `LICENSE`, `NOTICE` |
 
 **Also propagates:**
 - Repo settings (auto-merge, delete-on-merge, discussions, wiki, issues, description, homepage)
@@ -196,7 +196,7 @@ Current practical policy:
 - Repos are public by default.
 - Set `visibility: private` in `repos.yml` for private operations,
   credentials-adjacent automation, private data workflows, or unclear exposure risk.
-- Compliance reports flag visibility drift, and the weekly settings sync enforces
+- Compliance reports flag visibility drift, and the daily settings sync enforces
   the configured public/private state.
 - Do not restore the old private-except-`theprawn` rule; it does not match the
   current estate.
@@ -228,7 +228,7 @@ constitute verification or authorization to re-enable it automatically.
 
 ## Files preserved during sync
 
-- Preserve unlisted dot items, editor workspaces, skills and documentation.
+- Preserve unlisted dot items, editor workspaces and documentation.
 - Merge shared template directories while preserving custom forms.
 - Maintain the marked `.gitignore` block without deleting application files.
 
@@ -252,6 +252,12 @@ Run `python -m pip install PyYAML==6.0.3`, then
 `python -m unittest discover -s tests -v` on Linux with Node, Bash, Git and jq.
 The suite uses disposable repositories and a fake GitHub CLI/API. Do not dispatch
 the live bulk settings or secret workflow to validate a code change.
+
+## Shared skill retirement
+
+The root `skills/` bundle and `skills-lock.json` are retired and are no longer
+distributed. Install harness-local skills where needed; target repositories keep
+their own application files and are not modified by this retirement.
 
 ## Heartbeats without Vercel deployments
 

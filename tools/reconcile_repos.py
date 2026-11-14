@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 
 REPO_KEY = re.compile(r"^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+):\s*$")
 TIER_NAMES = ("external", "archived", "showcase", "standard")
@@ -54,61 +56,25 @@ def yaml_quote(value: str) -> str:
 
 
 def parse_repos(path: Path) -> dict[str, dict[str, Any]]:
-    repos: dict[str, dict[str, Any]] = {}
-    current: str | None = None
-    current_field: str | None = None
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.split("#", 1)[0].rstrip()
-        if not line.strip():
-            continue
-        match = REPO_KEY.match(line)
-        if match:
-            current = match.group(1)
-            current_field = None
-            repos[current] = {}
-            continue
-        if current is None:
-            continue
-        if line.startswith("  ") and not line.startswith("    "):
-            key, _, rest = line.strip().partition(":")
-            current_field = key
-            value = rest.strip()
-            if value == "":
-                repos[current][key] = []
-            elif value == "[]":
-                repos[current][key] = []
-            elif value in {"true", "false"}:
-                repos[current][key] = value == "true"
-            elif (value.startswith('"') and value.endswith('"')) or (
-                value.startswith("'") and value.endswith("'")
-            ):
-                repos[current][key] = value[1:-1]
-            else:
-                repos[current][key] = value
-            continue
-        if line.startswith("    ") and current_field:
-            stripped = line.strip()
-            if stripped.startswith("- "):
-                values = repos[current].setdefault(current_field, [])
-                if isinstance(values, list):
-                    values.append(stripped[2:].strip())
-    return repos
+    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(loaded, dict):
+        return {}
+    return {
+        name: value if isinstance(value, dict) else {}
+        for name, value in loaded.items()
+        if isinstance(name, str) and REPO_KEY.fullmatch(f"{name}:")
+    }
 
 
 def parse_tiers(path: Path) -> dict[str, list[str]]:
     tiers = {tier: [] for tier in TIER_NAMES}
-    current: str | None = None
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.split("#", 1)[0].rstrip()
-        stripped = line.strip()
-        if not stripped:
+    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(loaded, dict):
+        return tiers
+    for name, values in loaded.items():
+        if not isinstance(name, str):
             continue
-        if re.fullmatch(r"[A-Za-z_-]+:", stripped):
-            current = stripped[:-1]
-            tiers.setdefault(current, [])
-            continue
-        if current and stripped.startswith("- "):
-            tiers.setdefault(current, []).append(stripped[2:].strip())
+        tiers[name] = [value for value in values if isinstance(value, str)] if isinstance(values, list) else []
     return tiers
 
 

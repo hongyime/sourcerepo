@@ -1,7 +1,5 @@
-# NOTE: This .gitignore is designed for TARGET REPOS (not this source repo).
-# Files listed here (skills/, docs/, dot directories) ARE tracked in this source repo
-# because it is the source of truth. The sync script injects these rules into target repos
-# to prevent re-accumulation of AI tool artifacts.
+# Target repositories receive the managed exclusions below. Shared agent skills
+# are retired here and installed per harness instead of being distributed.
 
 # AI coding tool directories — local only, not tracked
 .adal/
@@ -40,6 +38,10 @@
 .vibe/
 .windsurf/
 .zencoder/
+
+# Retired shared agent-skill bundle
+skills/
+skills-lock.json
 
 # Python validation artifacts
 __pycache__/

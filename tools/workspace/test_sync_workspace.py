@@ -6,11 +6,16 @@ import os
 import subprocess
 import sys
 import time
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import sync_workspace as sync
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from tools.workspace import sync_workspace as sync
 
 
 def completed(stdout="", code=0, stderr=""):
@@ -133,6 +138,24 @@ class SafeSyncTests(unittest.TestCase):
         ):
             with self.assertRaises(RuntimeError):
                 sync.github_token()
+
+    def test_clone_configures_gh_credential_helper_without_a_token_git_argument(self):
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            output = io.StringIO()
+            with (
+                patch.object(sync.sys, "argv", ["sync_workspace.py", "--workspace", str(workspace)]),
+                patch.object(sync, "remote_repos", return_value=[{"full_name": "hongyime/repo"}]),
+                patch.object(sync, "local_repos", return_value={}),
+                patch.object(sync, "setup_git_credential_helper") as setup,
+                patch.object(sync, "run", return_value=completed()) as run,
+                contextlib.redirect_stdout(output),
+            ):
+                self.assertEqual(sync.main(), 0)
+        setup.assert_called_once_with()
+        clone = next(call.args[0] for call in run.call_args_list if call.args[0][:2] == ["git", "clone"])
+        self.assertEqual(clone[:4], ["git", "clone", "--filter=blob:none", "https://github.com/hongyime/repo.git"])
+        self.assertNotIn("-c", clone)
 
 
 if __name__ == "__main__":

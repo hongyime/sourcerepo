@@ -162,7 +162,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Report/push clean ahead-only owned repos.")
     parser.add_argument("--workspace", type=Path, default=Path(__file__).resolve().parents[3])
     parser.add_argument("--push", action="store_true", help="push clean ahead-only repos")
-    parser.add_argument("--command-timeout", type=int, default=8, help="per-repo git command timeout in seconds")
+    parser.add_argument("--command-timeout", type=int, default=30, help="per-repo git command timeout in seconds")
     parser.add_argument("--personal-owner", help="authenticated personal GitHub owner; defaults to gh api user")
     parser.add_argument(
         "--only",

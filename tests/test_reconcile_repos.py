@@ -19,6 +19,10 @@ SPEC = importlib.util.spec_from_file_location('reconcile_repos', ROOT / 'tools/r
 reconcile = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = reconcile
 SPEC.loader.exec_module(reconcile)
+CHECK_SPEC = importlib.util.spec_from_file_location('check_repo', ROOT / 'tools/check_repo.py')
+check_repo = importlib.util.module_from_spec(CHECK_SPEC)
+sys.modules[CHECK_SPEC.name] = check_repo
+CHECK_SPEC.loader.exec_module(check_repo)
 
 
 def inventory(name: str, **kwargs):
@@ -96,6 +100,22 @@ class CatalogTests(unittest.TestCase):
         entry = yaml.safe_load(self.repos.read_text())['hongyime/new']
         self.assertEqual(entry['topics'], [])
         self.assertEqual(entry['description'], description)
+
+    def test_catalog_parsers_keep_quoted_fragments_and_reject_invalid_yaml(self):
+        self.repos.write_text(
+            'hongyime/quoted:\n  description: "a # quoted value"\n'
+            '  homepage: "https://example.invalid/app#preview"\n  topics: []\n'
+        )
+        self.tiers.write_text('external:\narchived:\nstandard:\n  - "hongyime/quoted"\n')
+        self.assertEqual(reconcile.parse_repos(self.repos)['hongyime/quoted']['description'], 'a # quoted value')
+        self.assertEqual(reconcile.parse_repos(self.repos)['hongyime/quoted']['homepage'], 'https://example.invalid/app#preview')
+        self.assertEqual(reconcile.parse_tiers(self.tiers)['standard'], ['hongyime/quoted'])
+        self.assertEqual(check_repo.parse_simple_yaml(self.repos)['hongyime/quoted']['homepage'], 'https://example.invalid/app#preview')
+        self.repos.write_text('hongyime/broken: [\n')
+        with self.assertRaises(yaml.YAMLError):
+            reconcile.parse_repos(self.repos)
+        with self.assertRaises(yaml.YAMLError):
+            check_repo.parse_simple_yaml(self.repos)
 
     def test_allowed_topics_and_private_marker_are_preserved(self):
         self.apply([inventory('hongyime/new', private=True, topics=['python', 'keep-lfs', 'not-allowed'])])

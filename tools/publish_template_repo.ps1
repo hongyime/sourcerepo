@@ -2,7 +2,7 @@ param(
   [string]$Owner = "hongyime",
   [string]$Name = "theprawntemplate",
   [string]$Description = "Compliant starter template for The Prawn Organisation projects.",
-  [string]$SourcePath = (Join-Path $PSScriptRoot "templates\theprawntemplate")
+  [string]$SourcePath = (Join-Path (Join-Path $PSScriptRoot "templates") "theprawntemplate")
 )
 
 $ErrorActionPreference = "Stop"

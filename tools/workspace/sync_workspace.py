@@ -99,6 +99,12 @@ def github_token() -> str:
     )
 
 
+def setup_git_credential_helper() -> None:
+    proc = run(["gh", "auth", "setup-git"], timeout=30)
+    if proc.returncode != 0:
+        raise RuntimeError((proc.stderr or proc.stdout or "gh auth setup-git failed").strip())
+
+
 
 def github_api(path: str) -> object:
     url = f"https://api.github.com/{path.lstrip('/')}"
@@ -197,7 +203,7 @@ def local_repos(workspace: Path, command_timeout: int) -> dict[str, Path]:
 
 def clone_path(workspace: Path, full_name: str) -> Path:
     owner, repo = full_name.split("/", 1)
-    if owner in {"hongyime", authenticated_user()}:
+    if owner == "hongyime" or owner == authenticated_user():
         return workspace / repo
     return workspace / owner / repo
 
@@ -465,6 +471,7 @@ def main() -> int:
     print("-" * 72)
 
     cloned = current = updated = review = skipped = failed = 0
+    credential_helper_ready = False
     review_queue: list[tuple[str, Path, str]] = []
 
     def record_existing_result(full_name: str, repo_dir: Path, result: str) -> None:
@@ -518,12 +525,19 @@ def main() -> int:
             print(f"[WOULD CLONE        ] {full_name} -> {target}")
             skipped += 1
             continue
+        if not credential_helper_ready:
+            try:
+                setup_git_credential_helper()
+            except RuntimeError as exc:
+                failed += 1
+                print(f"[CLONE FAILED      ] {full_name}: credential helper setup failed: {exc[:160]}")
+                continue
+            credential_helper_ready = True
         target.parent.mkdir(parents=True, exist_ok=True)
         print(f"Cloning {full_name} (timeout: 600s)...")
         clone_url = f"https://github.com/{full_name}.git"
-        auth_header = f"http.extraHeader=Authorization: Bearer {github_token()}"
         clone = run(
-            ["git", "-c", auth_header, "clone", "--filter=blob:none", clone_url, str(target)],
+            ["git", "clone", "--filter=blob:none", clone_url, str(target)],
             timeout=600,
         )
         if clone.returncode == 0:

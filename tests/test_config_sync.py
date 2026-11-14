@@ -52,6 +52,8 @@ class ConfigSyncTests(unittest.TestCase):
             "PRAWN_GH_LOG": self.logs.as_posix(), "PRAWN_TEST_MODE": "normal",
             "PRAWN_TEST_TOPICS": "", "PRAWN_TEST_ARCHIVED": "false",
             "PRAWN_TEST_PROTECTED": "false", "PRAWN_GIT_LOG": (self.base / "git-calls.txt").as_posix(),
+            "PRAWN_TEST_SIZE": "1", "PRAWN_TEST_DEFAULT_BRANCH": "main",
+            "PRAWN_CLONE_ATTEMPTS": (self.base / "clone-attempts").as_posix(),
         })
         script = Path(os.environ.get("PRAWN_CONFIG_SYNC_SCRIPT", ROOT / ".github/scripts/sync-selected-paths.sh"))
         self.script = self.source / "sync.sh"
@@ -91,7 +93,7 @@ case "$1 $2" in
   'api --paginate')
     if [[ "$3" == orgs/* ]]; then
       [ "$PRAWN_TEST_MODE" != org_error ] || exit 71
-      printf '[{"name":"target","full_name":"hongyime/target","owner":{"login":"hongyime"},"archived":%s,"disabled":false,"fork":false,"default_branch":"main"}]\\n' "$PRAWN_TEST_ARCHIVED"
+      printf '[{"name":"target","full_name":"hongyime/target","owner":{"login":"hongyime"},"archived":%s,"disabled":false,"fork":false,"default_branch":"%s","size":%s}]\\n' "$PRAWN_TEST_ARCHIVED" "$PRAWN_TEST_DEFAULT_BRANCH" "$PRAWN_TEST_SIZE"
     elif [[ "$3" == user/repos* ]]; then
       [ "$PRAWN_TEST_MODE" != personal_error ] || exit 72
       printf '[]\\n'
@@ -108,6 +110,13 @@ case "$1 $2" in
     case "$6" in archived=true|archived=false) exit 0;; *) exit 92;; esac ;;
   'repo clone')
     [ "$3" = hongyime/target ] || exit 93
+    if [ "$PRAWN_TEST_MODE" = clone_retry ] && [ ! -e "$PRAWN_CLONE_ATTEMPTS" ]; then
+      mkdir -p "$4"
+      : > "$4/partial-clone"
+      : > "$PRAWN_CLONE_ATTEMPTS"
+      exit 74
+    fi
+    [ ! -e "$4/partial-clone" ] || exit 95
     exec "$PRAWN_REAL_GIT" clone "$PRAWN_BARE_REPO" "$4" ;;
   'pr create')
     [ "$PRAWN_TEST_MODE" != pr_error ] || exit 77
@@ -165,10 +174,14 @@ exec "$PRAWN_REAL_GIT" "$@"
         return subprocess.run([self.real_git, *args], cwd=cwd, env=self.env,
                               capture_output=True, text=True, check=True, timeout=60)
 
-    def run_sync(self, mode="normal", topics="", archived=False, protected=False):
+    def run_sync(self, mode="normal", topics="", archived=False, protected=False, size=1,
+                 default_branch="main", bare=None):
         env = {**self.env, "PRAWN_TEST_MODE": mode, "PRAWN_TEST_TOPICS": topics,
                "PRAWN_TEST_ARCHIVED": "true" if archived else "false",
-               "PRAWN_TEST_PROTECTED": "true" if protected else "false"}
+               "PRAWN_TEST_PROTECTED": "true" if protected else "false",
+               "PRAWN_TEST_SIZE": str(size), "PRAWN_TEST_DEFAULT_BRANCH": default_branch}
+        if bare:
+            env["PRAWN_BARE_REPO"] = Path(bare).as_posix()
         return subprocess.run([self.bash, "--noprofile", "--norc", "sync.sh"], cwd=self.source,
                               env=env, capture_output=True, text=True, timeout=120)
 
@@ -229,11 +242,73 @@ exec "$PRAWN_REAL_GIT" "$@"
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertNotIn("user/repos", self.logs.read_text())
 
+    def test_metadata_is_decoded_in_one_jq_pass(self):
+        script = self.script.read_text(encoding="utf-8")
+        self.assertNotIn('echo "$repo" | jq', script)
+        self.assertEqual(script.count('.[] | ['), 1)
+
+    def test_clone_retry_removes_a_partial_clone(self):
+        result = self.run_sync(mode="clone_retry")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.blob("managed.txt"), "new shared config\n")
+        self.assertEqual(self.logs.read_text().count("repo clone"), 2)
+
+    def test_empty_repo_seeds_the_declared_default_branch_without_protection_lookup(self):
+        empty = self.base / "empty.git"
+        self.git("init", "--bare", "--initial-branch=unused", str(empty), cwd=self.base)
+        result = self.run_sync(size=0, bare=empty)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.git("show", "main:managed.txt", cwd=empty).stdout, "new shared config\n")
+        self.assertNotIn("branches/main", self.logs.read_text())
+
+    def test_empty_repo_with_invalid_declared_default_branch_is_reported_without_clone(self):
+        result = self.run_sync(size=0, default_branch="bad..branch")
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("Invalid or missing declared default branch", result.stderr)
+        self.assert_untouched()
+
     def test_directory_sync_keeps_custom_issue_forms(self):
         result = self.run_sync()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(self.blob(".github/ISSUE_TEMPLATE/bug.yml"), "shared issue form\n")
         self.assertEqual(self.blob(".github/ISSUE_TEMPLATE/local.yml"), "custom local issue form\n")
+
+    def test_retired_managed_files_are_removed_only_when_their_blob_matches(self):
+        retired = {
+            ".github/FUNDING.yml": """# .github/FUNDING.yml
+# Funding is intentionally empty unless a repo has an organisation-level account.
+
+github: []
+patreon: []
+open_collective: []
+ko_fi: []
+tidelift: []
+community_bridge: []
+liberapay: []
+issuehunt: []
+lfx_crowdfunding: []
+polar: []
+buy_me_a_coffee: []
+custom: []
+""",
+        }
+        for path, contents in retired.items():
+            self.write(self.seed, path, contents)
+        self.update_fixture_commit()
+        result = self.run_sync()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        tracked = self.git("ls-tree", "-r", "--name-only", "main", cwd=self.bare).stdout.splitlines()
+        for path in retired:
+            self.assertNotIn(path, tracked)
+
+    def test_custom_retired_managed_file_is_preserved(self):
+        path = ".github/greetings.yml"
+        self.write(self.seed, path, "# .github/greetings.yml\n\ncustom: true\n")
+        self.update_fixture_commit()
+        result = self.run_sync()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.blob(path), "# .github/greetings.yml\n\ncustom: true\n")
+        self.assertIn(f"Preserving custom retired managed file: {path}", result.stdout)
 
     def test_sync_preserves_repository_contribution_contracts(self):
         contracts = ("AGENTS.md", "CONTRIBUTING.md", ".github/pull_request_template.md")

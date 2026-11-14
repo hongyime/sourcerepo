@@ -23,6 +23,13 @@ PUSH_FAILED_REPOS=()
 REARCHIVE_FAILED_REPOS=()
 declare -A CASE_PATHS_BY_LOWER=()
 CASE_PATHS_READY=false
+# These are the blobs last managed by sourcerepo before the files were retired.
+# A differing target is repository-owned and must not be deleted by this sync.
+RETIRED_MANAGED_FILES=(
+  ".github/dependabot_config.yml|09c340a726b00a98caa3c7b7110792ff30937508"
+  ".github/greetings.yml|4fc092d4960834d6f4afaafcee46b379f1720238"
+  ".github/FUNDING.yml|e98bbcfe9c203df49330387c01db2685c47cd277"
+)
 
 # Fetch completely before any repository mutation.
 # Portfolio scope: the hongyime org, plus two explicitly opted-in bryanseah234 user repos
@@ -52,6 +59,13 @@ retry() {
     fi
     sleep $((2 ** attempts))
   done
+}
+
+clone_repo() {
+  local full_name="$1" target_dir="$2"
+  # A failed Git clone can leave a partial directory that makes the retry fail.
+  rm -rf -- "$target_dir"
+  gh repo clone "$full_name" "$target_dir" -- --depth 1
 }
 
 publish_sync_pr() {
@@ -132,6 +146,29 @@ force_stage_path() {
   else
     git add -A "$path" 2>/dev/null || true
   fi
+}
+
+retire_managed_file() {
+  local spec="$1" path expected_blob actual_blob
+  IFS='|' read -r path expected_blob <<< "$spec"
+
+  if [ -L "$path" ] || [ ! -f "$path" ]; then
+    if [ -e "$path" ] || [ -L "$path" ]; then
+      echo "Preserving retired managed path that is not a regular file: $path"
+    fi
+    return 0
+  fi
+  if ! git ls-files --error-unmatch -- "$path" >/dev/null 2>&1; then
+    echo "Preserving untracked retired managed file: $path"
+    return 0
+  fi
+  actual_blob="$(git hash-object -- "$path")" || return 1
+  if [ "$actual_blob" != "$expected_blob" ]; then
+    echo "Preserving custom retired managed file: $path"
+    return 0
+  fi
+  echo "Removing retired managed file: $path"
+  git rm -- "$path"
 }
 
 build_case_path_index() {
@@ -267,19 +304,19 @@ rearchive_repo() {
   gh api -X PATCH "repos/$full_name" -f archived=true >/dev/null
 }
 
-REPOS_JSON="$REPOS_JSON"
 echo "Owner: $OWNER"
 echo "Source repo: $SOURCE_REPO_NAME"
 echo "Include archived: $INCLUDE_ARCHIVED"
-echo "Found repos: $(echo "$REPOS_JSON" | jq length)"
+mapfile -t REPO_ROWS < <(printf '%s\n' "$REPOS_JSON" | jq -r '
+  .[] | [
+    (.name // ""), (.owner.login // ""), (.archived // false),
+    (.disabled // false), (.fork // false), (.default_branch // ""), (.size // "")
+  ] | @tsv
+')
+echo "Found repos: ${#REPO_ROWS[@]}"
 
-while read -r repo; do
-  REPO_NAME="$(echo "$repo" | jq -r '.name')"
-  REPO_OWNER="$(echo "$repo" | jq -r '.owner.login')"
-  ARCHIVED="$(echo "$repo" | jq -r '.archived')"
-  DISABLED="$(echo "$repo" | jq -r '.disabled')"
-  FORKED="$(echo "$repo" | jq -r '.fork')"
-  DEFAULT_BRANCH="$(echo "$repo" | jq -r '.default_branch')"
+for repo in "${REPO_ROWS[@]}"; do
+  IFS=$'\t' read -r REPO_NAME REPO_OWNER ARCHIVED DISABLED FORKED DEFAULT_BRANCH REPO_SIZE <<< "$repo"
   FULL_NAME="$REPO_OWNER/$REPO_NAME"
 
   _full_lower="$(printf '%s' "$FULL_NAME" | tr '[:upper:]' '[:lower:]')"
@@ -317,15 +354,26 @@ while read -r repo; do
     continue
   fi
 
-  # Detect branch rules before cloning or changing archive state. Protected
-  # branches go straight to review instead of spending retries on a rejected
-  # direct push. An unreadable rule state must never imply an unprotected ref.
-  ENCODED_BRANCH="$(jq -rn --arg branch "$DEFAULT_BRANCH" '$branch | @uri')"
-  if ! BRANCH_PROTECTED="$(gh api "repos/$FULL_NAME/branches/$ENCODED_BRANCH" --jq '.protected')" ||
-      { [ "$BRANCH_PROTECTED" != "true" ] && [ "$BRANCH_PROTECTED" != "false" ]; }; then
-    echo "Cannot read branch protection for $FULL_NAME; skipping config sync" >&2
-    FAILED_REPOS+=("$REPO_NAME")
-    continue
+  IS_EMPTY_REPO=false
+  if [ "$REPO_SIZE" = "0" ]; then
+    if ! git check-ref-format --branch "$DEFAULT_BRANCH" >/dev/null 2>&1; then
+      echo "Invalid or missing declared default branch for empty repo $FULL_NAME; skipping config sync" >&2
+      FAILED_REPOS+=("$REPO_NAME")
+      continue
+    fi
+    IS_EMPTY_REPO=true
+    BRANCH_PROTECTED=false
+  else
+    # Detect branch rules before cloning or changing archive state. Protected
+    # branches go straight to review instead of spending retries on a rejected
+    # direct push. An unreadable rule state must never imply an unprotected ref.
+    ENCODED_BRANCH="$(python3 -c 'import sys; from urllib.parse import quote; print(quote(sys.argv[1], safe=""))' "$DEFAULT_BRANCH")"
+    if ! BRANCH_PROTECTED="$(gh api "repos/$FULL_NAME/branches/$ENCODED_BRANCH" --jq '.protected')" ||
+        { [ "$BRANCH_PROTECTED" != "true" ] && [ "$BRANCH_PROTECTED" != "false" ]; }; then
+      echo "Cannot read branch protection for $FULL_NAME; skipping config sync" >&2
+      FAILED_REPOS+=("$REPO_NAME")
+      continue
+    fi
   fi
 
   # Temporarily unarchive so we can push to it.
@@ -344,7 +392,7 @@ while read -r repo; do
   TARGET_DIR="$SYNC_ROOT/$REPO_NAME"
   echo "Processing $REPO_NAME..."
 
-  if ! retry gh repo clone "$FULL_NAME" "$TARGET_DIR" -- --depth 1; then
+  if ! retry clone_repo "$FULL_NAME" "$TARGET_DIR"; then
     echo "Failed to clone $FULL_NAME, skipping."
     FAILED_REPOS+=("$REPO_NAME")
     # Restore archive state before continuing
@@ -363,6 +411,17 @@ while read -r repo; do
     continue
   }
   CASE_PATHS_READY=false
+
+  if [ "$IS_EMPTY_REPO" = "true" ] && ! git switch -C "$DEFAULT_BRANCH"; then
+    echo "Cannot create declared default branch for empty repo $FULL_NAME; skipping config sync" >&2
+    FAILED_REPOS+=("$REPO_NAME")
+    cd "$WORKDIR" || exit 1
+    rm -rf "$TARGET_DIR"
+    if [ "$UNARCHIVED_HERE" = "true" ]; then
+      rearchive_repo "$FULL_NAME" || REARCHIVE_FAILED_REPOS+=("$REPO_NAME")
+    fi
+    continue
+  fi
 
   # Filter SYNC_ITEMS if repo opted out of LFS enforcement.
   EFFECTIVE_SYNC_ITEMS="$SYNC_ITEMS"
@@ -388,7 +447,15 @@ while read -r repo; do
   fi
 
   COPY_FAILED=false
+  for retired_file in "${RETIRED_MANAGED_FILES[@]}"; do
+    if ! retire_managed_file "$retired_file"; then
+      FAILED_REPOS+=("$REPO_NAME")
+      COPY_FAILED=true
+      break
+    fi
+  done
   while IFS='|' read -r src dst; do
+    [ "$COPY_FAILED" = "true" ] && break
     [ -z "$src" ] && continue
     # Seed missing contribution contracts; an existing repo owns its rules.
     # Keep case variants too, rather than replacing a custom local template.
@@ -475,7 +542,7 @@ while read -r repo; do
       REARCHIVE_FAILED_REPOS+=("$REPO_NAME")
     fi
   fi
-done < <(echo "$REPOS_JSON" | jq -c '.[] | {name, archived, disabled, fork, default_branch, owner}')
+done
 
 if [ "${#FAILED_REPOS[@]}" -gt 0 ]; then
   echo "Metadata/clone/unarchive/copy failures: ${FAILED_REPOS[*]}"

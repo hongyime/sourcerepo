@@ -101,8 +101,8 @@ function Add-ReposEntry {
 
   $entry = New-Object System.Collections.Generic.List[string]
   $entry.Add($FullName + ":")
-  $entry.Add("  description: `"$Description`"")
-  $entry.Add("  homepage: `"$Homepage`"")
+  $entry.Add("  description: $($Description | ConvertTo-Json -Compress)")
+  $entry.Add("  homepage: $($Homepage | ConvertTo-Json -Compress)")
   if ($Visibility -eq "private") {
     $entry.Add("  visibility: private")
   }
@@ -206,8 +206,8 @@ __pycache__/
 if ($SeedState) {
   $agentsDir = Join-Path $repoPath ".agents"
   New-Item -ItemType Directory -Force -Path $agentsDir | Out-Null
-  $stateTemplate = Join-Path $repoPath ".agents\STATE.template.md"
-  $statePath = Join-Path $repoPath ".agents\STATE.md"
+  $stateTemplate = Join-Path (Join-Path $repoPath ".agents") "STATE.template.md"
+  $statePath = Join-Path (Join-Path $repoPath ".agents") "STATE.md"
   if (Test-Path -LiteralPath $stateTemplate) {
     Copy-Item -LiteralPath $stateTemplate -Destination $statePath -Force
   }
@@ -243,12 +243,12 @@ if (-not [string]::IsNullOrWhiteSpace($Homepage)) {
 Add-YamlListItem -Path (Join-Path $shellRoot "tiers.yml") -Section $Tier -Value $fullName
 Add-ReposEntry -Path (Join-Path $shellRoot "repos.yml") -FullName $fullName -Description $Description -Homepage $Homepage -Visibility $visibilityValue -Topics $Topics
 
-python (Join-Path $shellRoot "tools\scan_identity.py") $repoPath --quiet
+python (Join-Path (Join-Path $shellRoot "tools") "scan_identity.py") $repoPath --quiet
 if ($LASTEXITCODE -ne 0) {
   throw "Identity scan failed for $repoPath"
 }
 
-python (Join-Path $shellRoot "tools\check_repo.py") $repoPath --json | Out-Host
+python (Join-Path (Join-Path $shellRoot "tools") "check_repo.py") $repoPath --json | Out-Host
 if ($LASTEXITCODE -ne 0) {
   throw "Compliance check failed for $repoPath"
 }
