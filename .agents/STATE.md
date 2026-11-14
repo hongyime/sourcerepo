@@ -19,6 +19,7 @@ Fleet Sync Reliability & Security Repair, portfolio retirement, and live product
   and blob-gated retired-file cleanup in fleet sync.
 - Retired the root skill bundle, obsolete shared files, and named history dumps.
 - 2026-11-14: docs/skills-manifest.md now names hongyime/theprawnskills as the single skills home and repo-standardization as the SHELL standard's home; AGENTS.md source-of-truth line no longer claims Skills (retired from this repo in b01008a).
+- 2026-11-14: repo-reconcile workflow now auto-merges its PR (squash, after a 15s grace + `gh pr checks --watch`); change is additive-only, stale entries stay review-only. Report text + tests updated. Bryan's word: "build it + auto-merge the PR too" — he forgets to file new-repo issues; the daily 16:30 SGT reconcile already discovers unregistered repos, so no new workflow was needed.
 - Updated catalog and workspace tooling with focused regression coverage.
 - Full verification passed (138 tests total, shell syntax, workflow YAML parsing).
 - Committed (`b01008a`) and pushed to `origin/main`.

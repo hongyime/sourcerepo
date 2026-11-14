@@ -50,7 +50,7 @@ jobs:
             --write \
             --report .github/repo-reconcile-summary.txt
 
-      - name: Open a new reconciliation PR
+      - name: Open and auto-merge the reconciliation PR
         if: steps.review.outputs.pending == 'false'
         shell: bash
         run: |
@@ -71,4 +71,16 @@ jobs:
           git add repos.yml tiers.yml
           git commit -m "$title"
           git push -u origin "$branch"
-          gh pr create --title "$title" --body-file .github/repo-reconcile-summary.txt --base "$DEFAULT_BRANCH" --head "$branch"
+          pr_url="$(gh pr create --title "$title" --body-file .github/repo-reconcile-summary.txt --base "$DEFAULT_BRANCH" --head "$branch")"
+          if [ -z "$pr_url" ]; then
+            echo "gh pr create did not return a PR URL" >&2
+            exit 1
+          fi
+          pr_number="${pr_url##*/}"
+          # Auto-merge: the reconcile change is additive-only (missing entries
+          # are added; stale entries are listed for review and never removed).
+          # Give PR-triggered checks a moment to register, then merge once
+          # they pass. A failed check leaves the PR open for review.
+          sleep 15
+          gh pr checks "$pr_number" --watch
+          gh pr merge "$pr_number" --squash --delete-branch

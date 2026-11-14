@@ -146,7 +146,8 @@ class CatalogTests(unittest.TestCase):
         report = self.report.read_text()
         for heading in ('## Summary', '## Changes', '## Testing', '## Checklist'):
             self.assertEqual(report.count(heading), 1)
-        self.assertIn('must be reviewed before merge', report)
+        self.assertIn('auto-merged once hosted checks pass', report)
+        self.assertIn('additive-only', report)
         self.assertNotIn('- [x]', report)
 
 
@@ -192,6 +193,11 @@ elif args == ['api', '--paginate', 'orgs/hongyime/repos?per_page=100']:
 elif args[:2] == ['pr', 'create']:
     body = pathlib.Path(args[args.index('--body-file') + 1]).read_text()
     pathlib.Path(os.environ['PRAWN_GH_CALLS'] + '.body').write_text(body)
+    print('https://github.com/hongyime/sourcerepo/pull/1')
+elif args[:2] == ['pr', 'checks']:
+    pass
+elif args[:2] == ['pr', 'merge']:
+    pass
 else:
     raise SystemExit(72)
 ''')
@@ -249,9 +255,15 @@ else:
         self.assertEqual(self.git('--git-dir', str(self.bare), 'rev-parse', 'main').stdout.strip(), self.before)
         self.assertEqual(self.git('--git-dir', str(self.bare), 'rev-parse', branch).stdout.strip(), self.git('rev-parse', 'HEAD').stdout.strip())
         calls = [json.loads(line) for line in self.calls.read_text().splitlines()]
-        self.assertEqual(calls[-1][:2], ['pr', 'create'])
-        self.assertIn(branch, calls[-1])
-        self.assertEqual(calls[-1][calls[-1].index('--base') + 1], 'main')
+        create = [call for call in calls if call[:2] == ['pr', 'create']]
+        self.assertEqual(len(create), 1)
+        self.assertIn(branch, create[0])
+        self.assertEqual(create[0][create[0].index('--base') + 1], 'main')
+        self.assertTrue(any(call[:2] == ['pr', 'checks'] for call in calls))
+        self.assertEqual(calls[-1][:2], ['pr', 'merge'])
+        self.assertIn('1', calls[-1])
+        self.assertIn('--squash', calls[-1])
+        self.assertIn('--delete-branch', calls[-1])
         body = Path(str(self.calls) + '.body').read_text()
         self.assertIn('## Checklist', body)
         self.assertFalse(any(call[:2] in (['pr', 'close'], ['pr', 'edit']) for call in calls))

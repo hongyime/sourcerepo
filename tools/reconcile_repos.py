@@ -252,7 +252,8 @@ def markdown_report(
     lines += [
         "", "## Testing", "",
         "This report compares the accessible owned-repository inventory with the current catalogs. "
-        "Hosted checks and the proposed diff must be reviewed before merge; discovery does not prove release readiness.",
+        "This PR is auto-merged once hosted checks pass. The change is additive-only: missing entries are added, "
+        "stale entries are listed for review and never removed; discovery does not prove release readiness.",
         "Missing inventory entries are retained. Absence or a 404 does not establish deletion or authorize cleanup.",
         "", "## Checklist", "",
         "- [ ] No debug code or console logs left behind.",
