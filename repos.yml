@@ -660,3 +660,9 @@ hongyime/upstashalive:
   homepage: ""
   visibility: private
   topics: []
+
+hongyime/theprawnlearnings:
+  description: "Harvested learnings from repos Bryan works on — decisions, gotchas, patterns. Filed by the project-transfer skill."
+  homepage: ""
+  visibility: private
+  topics: []
